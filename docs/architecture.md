@@ -1,5 +1,9 @@
 # Architecture
 
+![Edison Automation pipeline architecture](images/architecture.png)
+
+The diagram is generated from [`images/architecture.svg`](images/architecture.svg). To regenerate the PNG after editing the SVG, run `node scripts/render-architecture-png.mjs` from the repository root.
+
 ## Provider Decision
 
 Use Vercel for the browser application, API routes, preview deployments, and durable orchestration. Keep large originals and extracted page images in object storage, and keep durable package/review/export state in managed Postgres.

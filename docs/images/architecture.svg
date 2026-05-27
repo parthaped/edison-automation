@@ -1,0 +1,414 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1180" font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#0b1220"/>
+      <stop offset="100%" stop-color="#0f172a"/>
+    </linearGradient>
+    <linearGradient id="src" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1e3a8a"/>
+      <stop offset="100%" stop-color="#1e40af"/>
+    </linearGradient>
+    <linearGradient id="api" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#312e81"/>
+      <stop offset="100%" stop-color="#3730a3"/>
+    </linearGradient>
+    <linearGradient id="svc" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1f2937"/>
+      <stop offset="100%" stop-color="#111827"/>
+    </linearGradient>
+    <linearGradient id="pipe" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#7c2d12"/>
+      <stop offset="100%" stop-color="#9a3412"/>
+    </linearGradient>
+    <linearGradient id="conf" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#854d0e"/>
+      <stop offset="100%" stop-color="#a16207"/>
+    </linearGradient>
+    <linearGradient id="review" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#065f46"/>
+      <stop offset="100%" stop-color="#047857"/>
+    </linearGradient>
+    <linearGradient id="fb" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#5b21b6"/>
+      <stop offset="100%" stop-color="#6d28d9"/>
+    </linearGradient>
+    <linearGradient id="exp" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#155e75"/>
+      <stop offset="100%" stop-color="#0e7490"/>
+    </linearGradient>
+    <linearGradient id="store" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#334155"/>
+      <stop offset="100%" stop-color="#1e293b"/>
+    </linearGradient>
+    <marker id="arrow" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="9" markerHeight="9" orient="auto-start-reverse">
+      <path d="M 0 0 L 12 6 L 0 12 z" fill="#cbd5e1"/>
+    </marker>
+    <marker id="arrow-fb" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="9" markerHeight="9" orient="auto-start-reverse">
+      <path d="M 0 0 L 12 6 L 0 12 z" fill="#c4b5fd"/>
+    </marker>
+    <marker id="arrow-store" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="9" markerHeight="9" orient="auto-start-reverse">
+      <path d="M 0 0 L 12 6 L 0 12 z" fill="#94a3b8"/>
+    </marker>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#000" flood-opacity="0.35"/>
+    </filter>
+    <style>
+      .title { fill: #f8fafc; font-weight: 700; }
+      .subtitle { fill: #cbd5e1; }
+      .box-title { fill: #f8fafc; font-weight: 600; font-size: 16px; }
+      .box-sub { fill: #e2e8f0; font-size: 12px; }
+      .group-label { fill: #94a3b8; font-size: 12px; letter-spacing: 0.18em; font-weight: 600; text-transform: uppercase; }
+      .flow-label { fill: #cbd5e1; font-size: 11px; font-style: italic; }
+      .arrow { stroke: #cbd5e1; stroke-width: 2; fill: none; }
+      .arrow-fb { stroke: #c4b5fd; stroke-width: 2; fill: none; stroke-dasharray: 6 4; }
+      .arrow-store { stroke: #94a3b8; stroke-width: 1.5; fill: none; stroke-dasharray: 3 4; }
+      .group-frame { fill: none; stroke: #334155; stroke-width: 1; stroke-dasharray: 4 6; rx: 14; }
+    </style>
+  </defs>
+
+  <!-- Background -->
+  <rect x="0" y="0" width="1600" height="1180" fill="url(#bg)"/>
+
+  <!-- Header -->
+  <text x="60" y="58" class="title" font-size="30">Edison Automation Workbench &#8212; Pipeline Architecture</text>
+  <text x="60" y="86" class="subtitle" font-size="15">Box / manual ingest &#8594; user-gated transcription pipeline &#8594; confidence-routed human review &#8594; feedback-guided agent improvement &#8594; Omeka export</text>
+  <line x1="60" y1="100" x2="1540" y2="100" stroke="#1f2937" stroke-width="1"/>
+
+  <!-- ============================= INGEST SOURCES ============================= -->
+  <text x="80" y="138" class="group-label">1 &#183; Sources</text>
+  <rect x="60" y="148" width="380" height="170" class="group-frame"/>
+
+  <!-- Box -->
+  <g filter="url(#shadow)">
+    <rect x="80" y="172" width="160" height="130" rx="12" fill="url(#src)"/>
+    <text x="160" y="200" text-anchor="middle" class="box-title">Box</text>
+    <text x="160" y="222" text-anchor="middle" class="box-sub">Archival source</text>
+    <text x="160" y="244" text-anchor="middle" class="box-sub">FILE.UPLOADED webhook</text>
+    <text x="160" y="264" text-anchor="middle" class="box-sub">+ on-demand download</text>
+    <text x="160" y="288" text-anchor="middle" class="box-sub" fill="#bfdbfe">staff uploads batches</text>
+  </g>
+
+  <!-- Manual -->
+  <g filter="url(#shadow)">
+    <rect x="260" y="172" width="160" height="130" rx="12" fill="url(#src)"/>
+    <text x="340" y="200" text-anchor="middle" class="box-title">Manual upload</text>
+    <text x="340" y="222" text-anchor="middle" class="box-sub">Reviewer dashboard</text>
+    <text x="340" y="244" text-anchor="middle" class="box-sub">PDF / image / TIFF</text>
+    <text x="340" y="264" text-anchor="middle" class="box-sub">DOCX / CSV / Omeka</text>
+    <text x="340" y="288" text-anchor="middle" class="box-sub" fill="#bfdbfe">multipart form-data</text>
+  </g>
+
+  <!-- ============================= NEXT.JS APP (API + UI) ============================= -->
+  <text x="500" y="138" class="group-label">2 &#183; Next.js App on Vercel</text>
+  <rect x="480" y="148" width="600" height="170" class="group-frame"/>
+
+  <!-- API routes group -->
+  <g filter="url(#shadow)">
+    <rect x="500" y="172" width="280" height="130" rx="12" fill="url(#api)"/>
+    <text x="640" y="198" text-anchor="middle" class="box-title">API Routes</text>
+    <text x="640" y="220" text-anchor="middle" class="box-sub">/api/box/webhook</text>
+    <text x="640" y="238" text-anchor="middle" class="box-sub">/api/box/uploads/[id]/start-transcription</text>
+    <text x="640" y="256" text-anchor="middle" class="box-sub">/api/ingest/manual &#183; /api/review-actions</text>
+    <text x="640" y="274" text-anchor="middle" class="box-sub">/api/agent-feedback &#183; /api/agent-improvements</text>
+    <text x="640" y="292" text-anchor="middle" class="box-sub">/api/export/omeka &#183; /api/health</text>
+  </g>
+
+  <!-- UI -->
+  <g filter="url(#shadow)">
+    <rect x="800" y="172" width="260" height="130" rx="12" fill="url(#api)"/>
+    <text x="930" y="200" text-anchor="middle" class="box-title">Reviewer UI</text>
+    <text x="930" y="224" text-anchor="middle" class="box-sub">Dashboard &amp; Box intake queue</text>
+    <text x="930" y="246" text-anchor="middle" class="box-sub">&#171;Start transcription&#187; gate</text>
+    <text x="930" y="268" text-anchor="middle" class="box-sub">Side-by-side review workbench</text>
+    <text x="930" y="290" text-anchor="middle" class="box-sub">Audit + feedback capture</text>
+  </g>
+
+  <!-- ============================= SERVICE / REPO ============================= -->
+  <text x="1140" y="138" class="group-label">3 &#183; Service &amp; Persistence</text>
+  <rect x="1120" y="148" width="420" height="170" class="group-frame"/>
+
+  <g filter="url(#shadow)">
+    <rect x="1140" y="172" width="180" height="130" rx="12" fill="url(#svc)"/>
+    <text x="1230" y="200" text-anchor="middle" class="box-title">EdisonAutomationService</text>
+    <text x="1230" y="226" text-anchor="middle" class="box-sub">Workflow orchestration</text>
+    <text x="1230" y="246" text-anchor="middle" class="box-sub">Routes &#8594; service</text>
+    <text x="1230" y="266" text-anchor="middle" class="box-sub">Components &#8594; view data</text>
+    <text x="1230" y="288" text-anchor="middle" class="box-sub" fill="#cbd5e1">framework-agnostic core</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="1340" y="172" width="180" height="130" rx="12" fill="url(#store)"/>
+    <text x="1430" y="198" text-anchor="middle" class="box-title">EdisonRepository</text>
+    <text x="1430" y="222" text-anchor="middle" class="box-sub">Persistence contract</text>
+    <text x="1430" y="244" text-anchor="middle" class="box-sub">InMemory adapter (dev)</text>
+    <text x="1430" y="264" text-anchor="middle" class="box-sub">Postgres adapter (prod)</text>
+    <text x="1430" y="286" text-anchor="middle" class="box-sub">Object storage adapter</text>
+  </g>
+
+  <!-- Arrows from sources into API -->
+  <path class="arrow" d="M 240 237 Q 360 237 500 237" marker-end="url(#arrow)"/>
+  <text x="370" y="228" text-anchor="middle" class="flow-label">webhook / upload</text>
+  <path class="arrow" d="M 420 237 Q 460 237 500 237" stroke-opacity="0"/>
+  <path class="arrow" d="M 1060 237 L 1140 237" marker-end="url(#arrow)"/>
+
+  <!-- ============================= INTAKE QUEUE + USER GATE ============================= -->
+  <text x="80" y="372" class="group-label">4 &#183; Intake queue + user gate</text>
+  <rect x="60" y="382" width="1480" height="120" class="group-frame"/>
+
+  <g filter="url(#shadow)">
+    <rect x="80" y="402" width="260" height="86" rx="12" fill="url(#svc)"/>
+    <text x="210" y="430" text-anchor="middle" class="box-title">Box intake queue</text>
+    <text x="210" y="452" text-anchor="middle" class="box-sub">file / folder / path / size / checksum</text>
+    <text x="210" y="472" text-anchor="middle" class="box-sub">no auto-download on webhook</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="380" y="402" width="240" height="86" rx="12" fill="url(#svc)"/>
+    <text x="500" y="430" text-anchor="middle" class="box-title">Reviewer triage</text>
+    <text x="500" y="452" text-anchor="middle" class="box-sub">browse incoming uploads</text>
+    <text x="500" y="472" text-anchor="middle" class="box-sub">group folders &#183; mark ready</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="660" y="402" width="260" height="86" rx="12" fill="url(#svc)"/>
+    <text x="790" y="430" text-anchor="middle" class="box-title">&#171;Start transcription&#187;</text>
+    <text x="790" y="452" text-anchor="middle" class="box-sub">explicit user action</text>
+    <text x="790" y="472" text-anchor="middle" class="box-sub">queues the pipeline job</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="960" y="402" width="240" height="86" rx="12" fill="url(#svc)"/>
+    <text x="1080" y="430" text-anchor="middle" class="box-title">Box download worker</text>
+    <text x="1080" y="452" text-anchor="middle" class="box-sub">fetches originals only after gate</text>
+    <text x="1080" y="472" text-anchor="middle" class="box-sub">stores to object storage</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="1240" y="402" width="280" height="86" rx="12" fill="url(#svc)"/>
+    <text x="1380" y="430" text-anchor="middle" class="box-title">Pipeline job (durable)</text>
+    <text x="1380" y="452" text-anchor="middle" class="box-sub">retryable workflow runner</text>
+    <text x="1380" y="472" text-anchor="middle" class="box-sub">staged + auditable steps</text>
+  </g>
+
+  <path class="arrow" d="M 340 445 L 380 445" marker-end="url(#arrow)"/>
+  <path class="arrow" d="M 620 445 L 660 445" marker-end="url(#arrow)"/>
+  <path class="arrow" d="M 920 445 L 960 445" marker-end="url(#arrow)"/>
+  <path class="arrow" d="M 1200 445 L 1240 445" marker-end="url(#arrow)"/>
+
+  <!-- Down to pipeline -->
+  <path class="arrow" d="M 1380 488 L 1380 540 L 1460 540 L 1460 580" marker-end="url(#arrow)"/>
+
+  <!-- ============================= TRANSCRIPTION PIPELINE ============================= -->
+  <text x="80" y="552" class="group-label">5 &#183; Transcription pipeline (staged, versioned, auditable)</text>
+  <rect x="60" y="562" width="1480" height="200" class="group-frame"/>
+
+  <g filter="url(#shadow)">
+    <rect x="80" y="586" width="210" height="160" rx="12" fill="url(#pipe)"/>
+    <text x="185" y="614" text-anchor="middle" class="box-title">File validation</text>
+    <text x="185" y="638" text-anchor="middle" class="box-sub">type / size / integrity</text>
+    <text x="185" y="658" text-anchor="middle" class="box-sub">extractable vs manual</text>
+    <text x="185" y="678" text-anchor="middle" class="box-sub">PDF &#183; image &#183; TIFF</text>
+    <text x="185" y="698" text-anchor="middle" class="box-sub">DOCX &#183; CSV &#183; Omeka</text>
+    <text x="185" y="724" text-anchor="middle" class="box-sub" fill="#fde68a">routes to manual on fail</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="310" y="586" width="210" height="160" rx="12" fill="url(#pipe)"/>
+    <text x="415" y="614" text-anchor="middle" class="box-title">Page extraction</text>
+    <text x="415" y="638" text-anchor="middle" class="box-sub">multi-page splitting</text>
+    <text x="415" y="658" text-anchor="middle" class="box-sub">deterministic image names</text>
+    <text x="415" y="678" text-anchor="middle" class="box-sub">page manifest</text>
+    <text x="415" y="708" text-anchor="middle" class="box-sub" fill="#fde68a">thumbnails &#8594; storage</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="540" y="586" width="210" height="160" rx="12" fill="url(#pipe)"/>
+    <text x="645" y="614" text-anchor="middle" class="box-title">ID policy</text>
+    <text x="645" y="638" text-anchor="middle" class="box-sub">preserve supplied IDs</text>
+    <text x="645" y="658" text-anchor="middle" class="box-sub">collision-free temp IDs</text>
+    <text x="645" y="678" text-anchor="middle" class="box-sub">folder/document mapping</text>
+    <text x="645" y="708" text-anchor="middle" class="box-sub" fill="#fde68a">deterministic + reproducible</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="770" y="586" width="240" height="160" rx="12" fill="url(#pipe)"/>
+    <text x="890" y="614" text-anchor="middle" class="box-title">OCR + AI transcription</text>
+    <text x="890" y="638" text-anchor="middle" class="box-sub">staged, versioned prompts</text>
+    <text x="890" y="658" text-anchor="middle" class="box-sub">model + prompt version logged</text>
+    <text x="890" y="678" text-anchor="middle" class="box-sub">structured output schema</text>
+    <text x="890" y="708" text-anchor="middle" class="box-sub" fill="#fde68a">cost-aware orchestration</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="1030" y="586" width="220" height="160" rx="12" fill="url(#conf)"/>
+    <text x="1140" y="614" text-anchor="middle" class="box-title">Confidence scoring</text>
+    <text x="1140" y="638" text-anchor="middle" class="box-sub">per-field + per-page</text>
+    <text x="1140" y="658" text-anchor="middle" class="box-sub">calibration-aware</text>
+    <text x="1140" y="678" text-anchor="middle" class="box-sub">priors from feedback loop</text>
+    <text x="1140" y="708" text-anchor="middle" class="box-sub" fill="#fde68a">drives queue routing</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="1270" y="586" width="250" height="160" rx="12" fill="url(#conf)"/>
+    <text x="1395" y="614" text-anchor="middle" class="box-title">Queue routing</text>
+    <text x="1395" y="638" text-anchor="middle" class="box-sub">high &#8594; auto-approve hint</text>
+    <text x="1395" y="658" text-anchor="middle" class="box-sub">medium &#8594; reviewer pool</text>
+    <text x="1395" y="678" text-anchor="middle" class="box-sub">low &#8594; mandatory review</text>
+    <text x="1395" y="698" text-anchor="middle" class="box-sub">blocked &#8594; ops escalation</text>
+    <text x="1395" y="724" text-anchor="middle" class="box-sub" fill="#fde68a">audit trail per record</text>
+  </g>
+
+  <path class="arrow" d="M 290 666 L 310 666" marker-end="url(#arrow)"/>
+  <path class="arrow" d="M 520 666 L 540 666" marker-end="url(#arrow)"/>
+  <path class="arrow" d="M 750 666 L 770 666" marker-end="url(#arrow)"/>
+  <path class="arrow" d="M 1010 666 L 1030 666" marker-end="url(#arrow)"/>
+  <path class="arrow" d="M 1250 666 L 1270 666" marker-end="url(#arrow)"/>
+
+  <!-- ============================= REVIEW + EXPORT ============================= -->
+  <text x="80" y="802" class="group-label">6 &#183; Human review, feedback loop &amp; publication</text>
+  <rect x="60" y="812" width="1480" height="270" class="group-frame"/>
+
+  <!-- Review queues -->
+  <g filter="url(#shadow)">
+    <rect x="80" y="838" width="220" height="220" rx="12" fill="url(#review)"/>
+    <text x="190" y="866" text-anchor="middle" class="box-title">Review queues</text>
+    <text x="190" y="892" text-anchor="middle" class="box-sub">High &#8226; Medium &#8226; Low &#8226; Blocked</text>
+    <text x="190" y="918" text-anchor="middle" class="box-sub">priority + age</text>
+    <text x="190" y="938" text-anchor="middle" class="box-sub">batch &amp; folder grouping</text>
+    <text x="190" y="966" text-anchor="middle" class="box-sub">assignment + ownership</text>
+    <text x="190" y="994" text-anchor="middle" class="box-sub">durable in Postgres</text>
+    <text x="190" y="1020" text-anchor="middle" class="box-sub" fill="#a7f3d0">stable for large batches</text>
+  </g>
+
+  <!-- Review workbench -->
+  <g filter="url(#shadow)">
+    <rect x="320" y="838" width="280" height="220" rx="12" fill="url(#review)"/>
+    <text x="460" y="866" text-anchor="middle" class="box-title">Review workbench</text>
+    <text x="460" y="892" text-anchor="middle" class="box-sub">source document &#8596; transcription</text>
+    <text x="460" y="912" text-anchor="middle" class="box-sub">editable fields + metadata</text>
+    <text x="460" y="934" text-anchor="middle" class="box-sub">approve / correct / reject</text>
+    <text x="460" y="958" text-anchor="middle" class="box-sub">structured correction events</text>
+    <text x="460" y="982" text-anchor="middle" class="box-sub">keyboard-first review</text>
+    <text x="460" y="1006" text-anchor="middle" class="box-sub" fill="#a7f3d0">/api/review-actions audit</text>
+    <text x="460" y="1032" text-anchor="middle" class="box-sub" fill="#a7f3d0">side-by-side IIIF viewer</text>
+  </g>
+
+  <!-- Feedback events -->
+  <g filter="url(#shadow)">
+    <rect x="620" y="838" width="240" height="100" rx="12" fill="url(#fb)"/>
+    <text x="740" y="866" text-anchor="middle" class="box-title">AgentFeedback events</text>
+    <text x="740" y="890" text-anchor="middle" class="box-sub">original &#8594; corrected</text>
+    <text x="740" y="908" text-anchor="middle" class="box-sub">issue tags + prompt version</text>
+    <text x="740" y="926" text-anchor="middle" class="box-sub">confidence before / after</text>
+  </g>
+
+  <!-- Feedback engine -->
+  <g filter="url(#shadow)">
+    <rect x="620" y="958" width="240" height="100" rx="12" fill="url(#fb)"/>
+    <text x="740" y="986" text-anchor="middle" class="box-title">feedback-engine</text>
+    <text x="740" y="1010" text-anchor="middle" class="box-sub">cluster recurring issues</text>
+    <text x="740" y="1028" text-anchor="middle" class="box-sub">draft prompt + script revisions</text>
+    <text x="740" y="1046" text-anchor="middle" class="box-sub">confidence calibration deltas</text>
+  </g>
+
+  <!-- Benchmark + approval -->
+  <g filter="url(#shadow)">
+    <rect x="880" y="838" width="240" height="100" rx="12" fill="url(#fb)"/>
+    <text x="1000" y="866" text-anchor="middle" class="box-title">Draft prompt / agent script</text>
+    <text x="1000" y="890" text-anchor="middle" class="box-sub">status: draft</text>
+    <text x="1000" y="908" text-anchor="middle" class="box-sub">awaits benchmark eval</text>
+    <text x="1000" y="926" text-anchor="middle" class="box-sub">staff approval required</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="880" y="958" width="240" height="100" rx="12" fill="url(#fb)"/>
+    <text x="1000" y="986" text-anchor="middle" class="box-title">Benchmark + promote</text>
+    <text x="1000" y="1010" text-anchor="middle" class="box-sub">gold-standard set</text>
+    <text x="1000" y="1028" text-anchor="middle" class="box-sub">regression check</text>
+    <text x="1000" y="1046" text-anchor="middle" class="box-sub">promote to active prompt</text>
+  </g>
+
+  <!-- Export -->
+  <g filter="url(#shadow)">
+    <rect x="1140" y="838" width="180" height="220" rx="12" fill="url(#exp)"/>
+    <text x="1230" y="866" text-anchor="middle" class="box-title">Omeka export</text>
+    <text x="1230" y="892" text-anchor="middle" class="box-sub">CSV import payloads</text>
+    <text x="1230" y="912" text-anchor="middle" class="box-sub">Omeka S API client</text>
+    <text x="1230" y="934" text-anchor="middle" class="box-sub">item sets &#8596; folders</text>
+    <text x="1230" y="956" text-anchor="middle" class="box-sub">items &#8596; documents</text>
+    <text x="1230" y="982" text-anchor="middle" class="box-sub">IIIF presentation manifests</text>
+    <text x="1230" y="1010" text-anchor="middle" class="box-sub" fill="#a5f3fc">authenticated writes</text>
+    <text x="1230" y="1036" text-anchor="middle" class="box-sub" fill="#a5f3fc">export audit log</text>
+  </g>
+
+  <!-- Omeka destination -->
+  <g filter="url(#shadow)">
+    <rect x="1340" y="892" width="180" height="110" rx="12" fill="url(#src)"/>
+    <text x="1430" y="922" text-anchor="middle" class="box-title">Omeka S &amp; IIIF</text>
+    <text x="1430" y="946" text-anchor="middle" class="box-sub">Edison Digital Edition</text>
+    <text x="1430" y="966" text-anchor="middle" class="box-sub">public catalog + image server</text>
+    <text x="1430" y="988" text-anchor="middle" class="box-sub" fill="#bfdbfe">downstream consumer</text>
+  </g>
+
+  <!-- Connections: routing -> review queues -->
+  <path class="arrow" d="M 1395 746 L 1395 790 L 190 790 L 190 838" marker-end="url(#arrow)"/>
+  <text x="780" y="782" text-anchor="middle" class="flow-label">confidence-routed packages</text>
+
+  <!-- review queues -> workbench -->
+  <path class="arrow" d="M 300 948 L 320 948" marker-end="url(#arrow)"/>
+
+  <!-- workbench -> feedback events -->
+  <path class="arrow" d="M 600 888 L 620 888" marker-end="url(#arrow)"/>
+  <text x="610" y="876" text-anchor="middle" class="flow-label">corrections</text>
+
+  <!-- feedback events -> engine -->
+  <path class="arrow-fb" d="M 740 938 L 740 958" marker-end="url(#arrow-fb)"/>
+
+  <!-- engine -> draft prompt -->
+  <path class="arrow-fb" d="M 860 1008 Q 870 1008 880 988" marker-end="url(#arrow-fb)"/>
+  <path class="arrow-fb" d="M 860 888 L 880 888" marker-end="url(#arrow-fb)"/>
+
+  <!-- draft -> benchmark -->
+  <path class="arrow-fb" d="M 1000 938 L 1000 958" marker-end="url(#arrow-fb)"/>
+
+  <!-- benchmark -> back to AI transcription (loop) -->
+  <path class="arrow-fb" d="M 880 1008 L 740 1008 L 740 1100 L 890 1100 L 890 760" marker-end="url(#arrow-fb)"/>
+  <text x="770" y="1118" text-anchor="middle" class="flow-label">approved prompts &#8594; next runs raise quality &amp; lower review load</text>
+
+  <!-- workbench -> export -->
+  <path class="arrow" d="M 600 1000 Q 870 1000 1140 970" marker-end="url(#arrow)"/>
+  <text x="900" y="990" text-anchor="middle" class="flow-label">approved records</text>
+
+  <!-- export -> omeka -->
+  <path class="arrow" d="M 1320 948 L 1340 948" marker-end="url(#arrow)"/>
+
+  <!-- ============================= STORAGE BACKBONE ============================= -->
+  <!-- Storage connection lines from service to many groups -->
+  <path class="arrow-store" d="M 1430 302 L 1430 360 L 800 360 L 800 402" marker-end="url(#arrow-store)"/>
+  <path class="arrow-store" d="M 1430 302 L 1430 568 L 890 568 L 890 586" marker-end="url(#arrow-store)"/>
+  <path class="arrow-store" d="M 1430 302 L 1430 820 L 460 820 L 460 838" marker-end="url(#arrow-store)"/>
+  <text x="320" y="816" class="flow-label">repository + object storage backs every stage</text>
+
+  <!-- Legend -->
+  <g transform="translate(60, 1120)">
+    <rect x="0" y="0" width="14" height="14" fill="url(#src)"/>
+    <text x="22" y="12" class="box-sub">External source / destination</text>
+    <rect x="220" y="0" width="14" height="14" fill="url(#api)"/>
+    <text x="242" y="12" class="box-sub">Next.js (Vercel) API / UI</text>
+    <rect x="430" y="0" width="14" height="14" fill="url(#svc)"/>
+    <text x="452" y="12" class="box-sub">Service / orchestration</text>
+    <rect x="620" y="0" width="14" height="14" fill="url(#pipe)"/>
+    <text x="642" y="12" class="box-sub">Transcription stage</text>
+    <rect x="790" y="0" width="14" height="14" fill="url(#conf)"/>
+    <text x="812" y="12" class="box-sub">Confidence + routing</text>
+    <rect x="960" y="0" width="14" height="14" fill="url(#review)"/>
+    <text x="982" y="12" class="box-sub">Human review</text>
+    <rect x="1110" y="0" width="14" height="14" fill="url(#fb)"/>
+    <text x="1132" y="12" class="box-sub">Feedback &#8594; agent improvement</text>
+    <rect x="1330" y="0" width="14" height="14" fill="url(#exp)"/>
+    <text x="1352" y="12" class="box-sub">Export</text>
+    <rect x="1430" y="0" width="14" height="14" fill="url(#store)"/>
+    <text x="1452" y="12" class="box-sub">Persistence</text>
+  </g>
+</svg>

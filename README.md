@@ -4,6 +4,12 @@ Browser-accessible review and automation service for the Thomas A. Edison Papers
 
 ![Edison Automation dashboard](docs/images/dashboard.png)
 
+## Architecture at a Glance
+
+![Edison Automation pipeline architecture](docs/images/architecture.png)
+
+The diagram above walks the full pipeline: Box / manual ingest, user-gated start, the staged transcription stages (validation → extraction → ID policy → OCR + AI transcription → confidence scoring → queue routing), the human review workbench, the feedback-guided agent improvement loop, and the Omeka S / IIIF export. See [`docs/architecture.md`](docs/architecture.md) for the written companion. The source SVG lives at [`docs/images/architecture.svg`](docs/images/architecture.svg) and the PNG can be regenerated with `node scripts/render-architecture-png.mjs`.
+
 ## Purpose
 
 Edison Automation is designed as a maintainable production service, not a demo. It gives archival staff a readable workbench for processing large batches of documents from Box, reviewing AI-assisted transcriptions beside the source document, capturing human corrections, and exporting records for Omeka S/IIIF publication.
