@@ -5,13 +5,15 @@ import {
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
-  FileText,
+  ExternalLink,
   Save,
 } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import Link from "next/link";
+import { motion } from "motion/react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
-import { Badge } from "@/components/ui/badge";
+import { DocumentViewer } from "@/components/document-viewer";
+import { motionSpring } from "@/components/motion-primitives";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -23,7 +25,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type {
   ConfidenceBucket,
   DocumentPackage,
@@ -32,7 +33,6 @@ import type {
   ReviewEvent,
   TranscriptionRun,
 } from "@/lib/edison/types";
-import { motionSpring } from "@/components/motion-primitives";
 
 interface ReviewerWorkbenchProps {
   documents: DocumentPackage[];
@@ -64,7 +64,6 @@ export function ReviewerWorkbench({
   reviewEvents,
 }: ReviewerWorkbenchProps) {
   const [activeIndex, setActiveIndex] = useState(0);
-  const [activePage, setActivePage] = useState(0);
   const [editedText, setEditedText] = useState(transcription.diplomaticText);
   const [decision, setDecision] = useState<ReviewDecision>("edited_transcription");
 
@@ -85,166 +84,73 @@ export function ReviewerWorkbench({
     );
   }
 
-  const activeImage = activeDocument.pages[activePage];
   const queuePosition = `${activeIndex + 1} of ${documents.length}`;
   const decisionLabel =
     decisions.find((d) => d.value === decision)?.label ?? "Edit transcription";
-  const characterCount = editedText.length;
 
   function goToDocument(index: number) {
     const next = Math.max(0, Math.min(index, documents.length - 1));
     setActiveIndex(next);
-    setActivePage(0);
+    setEditedText(transcription.diplomaticText);
   }
 
   function handleSave() {
     toast.success("Review action saved", {
-      description: `${decisionLabel} \u00b7 ${activeDocument.documentId}`,
+      description: `${decisionLabel} \u00b7 ${activeDocument.documentId} \u00b7 ${editedText.length} ch`,
     });
   }
 
   return (
     <section
       aria-labelledby="review-workbench-title"
-      className="surface-elevated grid gap-6 rounded-2xl p-5 lg:grid-cols-[minmax(0,1.15fr)_minmax(380px,0.85fr)] lg:p-7"
+      className="surface-elevated space-y-6 rounded-2xl p-5 lg:p-7"
     >
-      <div className="min-w-0 space-y-5">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-amber-700/90">
-              Review queue {queuePosition}
-            </p>
-            <h2
-              id="review-workbench-title"
-              className="mt-1.5 text-2xl font-semibold tracking-[-0.02em] text-foreground"
-            >
-              {activeDocument.title}
-            </h2>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <NavButton
-              direction="prev"
-              onClick={() => goToDocument(activeIndex - 1)}
-              disabled={activeIndex === 0}
-            />
-            <NavButton
-              direction="next"
-              onClick={() => goToDocument(activeIndex + 1)}
-              disabled={activeIndex === documents.length - 1}
-            />
-          </div>
+      <header className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-amber-700/90">
+            Review queue {queuePosition}
+          </p>
+          <h2
+            id="review-workbench-title"
+            className="mt-1.5 truncate text-2xl font-semibold tracking-[-0.02em] text-foreground"
+          >
+            {activeDocument.title}
+          </h2>
         </div>
-
-        <InfoBar document={activeDocument} />
-
-        <div className="overflow-hidden rounded-2xl border border-border/70 bg-muted/30">
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/60 bg-card/60 px-4 py-3">
-            <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-              <FileText className="h-4 w-4 text-muted-foreground" strokeWidth={1.5} />
-              Source document viewer
-            </div>
-            {activeDocument.pages.length > 0 ? (
-              <Tabs
-                value={String(activePage)}
-                onValueChange={(value) => setActivePage(Number(value))}
-                aria-label="Page navigation"
-              >
-                <TabsList>
-                  {activeDocument.pages.map((page) => (
-                    <TabsTrigger
-                      key={page.id}
-                      value={String(page.pageIndex)}
-                    >
-                      Page {page.sourcePage}
-                    </TabsTrigger>
-                  ))}
-                </TabsList>
-              </Tabs>
-            ) : null}
-          </div>
-          <div className="flex min-h-[520px] items-center justify-center p-6 sm:p-10">
-            <AnimatePresence mode="wait" initial={false}>
-              <motion.div
-                key={`${activeDocument.id}-${activePage}`}
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -6 }}
-                transition={motionSpring}
-                className="w-full max-w-2xl"
-              >
-                {activeImage ? (
-                  <article className="rounded-xl border border-border/70 bg-card p-8 shadow-[inset_0_1px_0_rgba(255,255,255,0.6),0_1px_2px_rgba(0,0,0,0.04)]">
-                    <div className="mb-6 flex items-center justify-between border-b border-border/60 pb-3">
-                      <span className="font-mono text-[12px] text-muted-foreground">
-                        {activeImage.imageFilename}
-                      </span>
-                      <Badge variant="outline" className="rounded-full px-2.5">
-                        Page {activeImage.sourcePage}
-                      </Badge>
-                    </div>
-                    <div className="space-y-4 text-[17px] leading-8 text-foreground/90">
-                      <p>Letterhead: Edison Electric Light Co. of Philadelphia</p>
-                      <p>Dateline: Philadelphia, Jan. 12, 1890</p>
-                      <p>
-                        Body: Mr. Marks reports on the{" "}
-                        <span className="rounded-sm bg-amber-100/70 px-1 underline decoration-amber-500/70 decoration-2 underline-offset-[5px]">
-                          [filament?]
-                        </span>{" "}
-                        tests and station materials.
-                      </p>
-                      <p>Signature: W. D. Marks</p>
-                    </div>
-                  </article>
-                ) : (
-                  <div className="rounded-xl border border-dashed border-border bg-card/70 p-10 text-center">
-                    <p className="text-lg font-semibold text-foreground">
-                      No extracted pages available.
-                    </p>
-                    <p className="mt-2 text-sm text-muted-foreground">
-                      This file is blocked or unsupported and should be handled
-                      manually.
-                    </p>
-                  </div>
-                )}
-              </motion.div>
-            </AnimatePresence>
-          </div>
+        <div className="flex items-center gap-1.5">
+          <Link
+            href={`/viewer/${activeDocument.documentId}?panel=both`}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex h-8 items-center gap-1.5 rounded-full border border-border/80 bg-card px-3 text-[13px] font-medium text-foreground shadow-[0_1px_2px_rgba(0,0,0,0.04)] transition-colors hover:bg-muted/60"
+          >
+            <ExternalLink className="h-3.5 w-3.5" strokeWidth={1.8} aria-hidden="true" />
+            Open standalone
+          </Link>
+          <NavButton
+            direction="prev"
+            onClick={() => goToDocument(activeIndex - 1)}
+            disabled={activeIndex === 0}
+          />
+          <NavButton
+            direction="next"
+            onClick={() => goToDocument(activeIndex + 1)}
+            disabled={activeIndex === documents.length - 1}
+          />
         </div>
-      </div>
+      </header>
 
-      <aside
-        className="min-w-0 space-y-5"
-        aria-label="Transcription and metadata correction panel"
-      >
-        <Card className="surface-elevated">
-          <CardHeader>
-            <div className="flex items-center justify-between gap-3">
-              <label
-                htmlFor="transcription"
-                className="text-base font-semibold tracking-[-0.01em] text-foreground"
-              >
-                Diplomatic transcription
-              </label>
-              <span className="font-mono text-[11px] tabular-nums text-muted-foreground">
-                {characterCount} ch
-              </span>
-            </div>
-            <p className="text-sm text-muted-foreground">
-              Preserve original spelling, abbreviations, punctuation, annotations,
-              and uncertainty marks.
-            </p>
-          </CardHeader>
-          <CardContent>
-            <textarea
-              id="transcription"
-              className="min-h-72 w-full resize-y rounded-xl border border-border/80 bg-card px-4 py-3 font-mono text-[13px] leading-6 text-foreground transition-shadow placeholder:text-muted-foreground/70 focus:border-amber-400/70 focus:outline-none focus:ring-4 focus:ring-amber-300/30"
-              value={editedText}
-              onChange={(event) => setEditedText(event.target.value)}
-              spellCheck={false}
-            />
-          </CardContent>
-        </Card>
+      <InfoBar document={activeDocument} />
 
+      <DocumentViewer
+        document={activeDocument}
+        transcription={transcription}
+        mode="workbench"
+        initialPanel="transcription"
+        onTranscriptionChange={setEditedText}
+      />
+
+      <div className="grid gap-5 lg:grid-cols-2">
         <Card className="surface-elevated">
           <CardHeader>
             <CardTitle className="text-base font-semibold tracking-[-0.01em]">
@@ -297,12 +203,12 @@ export function ReviewerWorkbench({
             </p>
           </CardContent>
         </Card>
+      </div>
 
+      <div className="grid gap-5 lg:grid-cols-[1fr_1.2fr]">
         <Card className="surface-elevated">
           <CardHeader>
-            <CardTitle
-              className="text-base font-semibold tracking-[-0.01em]"
-            >
+            <CardTitle className="text-base font-semibold tracking-[-0.01em]">
               Review action
             </CardTitle>
           </CardHeader>
@@ -383,7 +289,7 @@ export function ReviewerWorkbench({
             )}
           </CardContent>
         </Card>
-      </aside>
+      </div>
     </section>
   );
 }

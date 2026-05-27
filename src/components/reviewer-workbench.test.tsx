@@ -21,7 +21,7 @@ describe("ReviewerWorkbench", () => {
     );
 
     expect(screen.getByText("D9032-F")).toBeInTheDocument();
-    expect(screen.getByText("D9032-00001")).toBeInTheDocument();
+    expect(screen.getAllByText("D9032-00001").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByLabelText("Diplomatic transcription")).toHaveValue(
       sampleTranscription.diplomaticText,
     );
@@ -56,5 +56,22 @@ describe("ReviewerWorkbench", () => {
     );
 
     expect(screen.getByText("No extracted pages available.")).toBeInTheDocument();
+  });
+
+  it("exposes a link to the standalone embeddable viewer", () => {
+    render(
+      <ReviewerWorkbench
+        documents={[sampleDocuments[0]]}
+        transcription={sampleTranscription}
+        metadata={sampleMetadata}
+        reviewEvents={sampleReviewEvents}
+      />,
+    );
+
+    const link = screen.getByRole("link", { name: /open standalone/i });
+    expect(link).toHaveAttribute(
+      "href",
+      "/viewer/D9032-00001?panel=both",
+    );
   });
 });

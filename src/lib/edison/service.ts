@@ -211,6 +211,10 @@ export class EdisonAutomationService {
     };
   }
 
+  async getReviewCase(documentId?: string) {
+    return this.repository.getReviewCase(documentId);
+  }
+
   async ingestManualFiles(input: ManualIngestInput): Promise<DocumentPackage[]> {
     if (input.files.length === 0) {
       throw new AppError(
