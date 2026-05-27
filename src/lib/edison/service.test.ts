@@ -47,8 +47,24 @@ describe("EdisonAutomationService", () => {
     });
   });
 
-  it("exports CSV through approved/reviewable repository rows", async () => {
+  it("refuses to export when no documents are approved", async () => {
     const service = new EdisonAutomationService(new InMemoryEdisonRepository(true));
+
+    await expect(service.exportOmekaCsv()).rejects.toMatchObject({
+      code: "EXPORT_FAILED",
+      status: 409,
+    });
+  });
+
+  it("exports only approved records to the Omeka CSV", async () => {
+    const repository = new InMemoryEdisonRepository(true);
+    const service = new EdisonAutomationService(repository);
+    const documents = await repository.listDocuments();
+    const target = documents.find((document) => document.documentId === "D9032-00001");
+    if (!target) {
+      throw new Error("Seed data must include D9032-00001 for this test.");
+    }
+    await repository.saveDocuments([{ ...target, status: "approved" }]);
 
     const csv = await service.exportOmekaCsv();
 
@@ -90,7 +106,7 @@ describe("EdisonAutomationService", () => {
 
     expect(result.accepted).toBe(true);
     expect(result.upload.status).toBe("queued_for_pipeline");
-    expect(result.pipelineJob.steps).toContain("run-agi-transcription-pipeline");
+    expect(result.pendingSteps).toContain("run-pipeline");
   });
 
   it("records feedback and generates an agent improvement draft", async () => {

@@ -7,10 +7,60 @@ export interface OmekaVerificationResult {
   notes: string[];
 }
 
+type CheckKey = keyof Omit<OmekaVerificationResult, "notes">;
+
+interface EndpointCheck {
+  key: CheckKey;
+  url: string;
+}
+
+interface CheckOutcome {
+  key: CheckKey;
+  status: "ok" | "failed" | "not-configured";
+  note?: string;
+}
+
 export async function verifyOmekaPublicEndpoints(
   baseUrl = "https://edisondigital.rutgers.edu",
   fetcher: typeof fetch = fetch,
 ): Promise<OmekaVerificationResult> {
+  const checks: EndpointCheck[] = [
+    { key: "apiRoot", url: `${baseUrl}/api` },
+    { key: "itemsEndpoint", url: `${baseUrl}/api/items?per_page=1` },
+    { key: "itemSetsEndpoint", url: `${baseUrl}/api/item_sets?per_page=1` },
+    { key: "iiifPresentation", url: `${baseUrl}/iiif-presentation/3/item/1/manifest` },
+    { key: "iiifImage", url: `${baseUrl}/iiif/159390/info.json` },
+  ];
+
+  const outcomes = await Promise.all(
+    checks.map<Promise<CheckOutcome>>(async (check) => {
+      try {
+        const response = await fetcher(check.url, { method: "GET" });
+        if (response.ok) {
+          return { key: check.key, status: "ok" };
+        }
+        if (check.key === "iiifPresentation" || check.key === "iiifImage") {
+          return {
+            key: check.key,
+            status: "not-configured",
+            note: `${check.url} returned ${response.status}; verify IIIF modules with admin access.`,
+          };
+        }
+        return {
+          key: check.key,
+          status: "failed",
+          note: `${check.url} returned ${response.status}.`,
+        };
+      } catch {
+        return {
+          key: check.key,
+          status: "failed",
+          note: `${check.url} could not be reached.`,
+        };
+      }
+    }),
+  );
+
   const notes: string[] = [];
   const result: OmekaVerificationResult = {
     apiRoot: "failed",
@@ -21,32 +71,14 @@ export async function verifyOmekaPublicEndpoints(
     notes,
   };
 
-  const checks: Array<{
-    key: keyof Omit<OmekaVerificationResult, "notes">;
-    url: string;
-  }> = [
-    { key: "apiRoot", url: `${baseUrl}/api` },
-    { key: "itemsEndpoint", url: `${baseUrl}/api/items?per_page=1` },
-    { key: "itemSetsEndpoint", url: `${baseUrl}/api/item_sets?per_page=1` },
-    { key: "iiifPresentation", url: `${baseUrl}/iiif-presentation/3/item/1/manifest` },
-    { key: "iiifImage", url: `${baseUrl}/iiif/159390/info.json` },
-  ];
-
-  for (const check of checks) {
-    try {
-      const response = await fetcher(check.url, { method: "GET" });
-      if (response.ok) {
-        result[check.key] = "ok";
-      } else if (check.key === "iiifPresentation" || check.key === "iiifImage") {
-        result[check.key] = "not-configured";
-        notes.push(`${check.url} returned ${response.status}; verify IIIF modules with admin access.`);
-      } else {
-        result[check.key] = "failed";
-        notes.push(`${check.url} returned ${response.status}.`);
-      }
-    } catch {
-      result[check.key] = "failed";
-      notes.push(`${check.url} could not be reached.`);
+  for (const outcome of outcomes) {
+    if (outcome.key === "iiifPresentation" || outcome.key === "iiifImage") {
+      result[outcome.key] = outcome.status;
+    } else {
+      result[outcome.key] = outcome.status === "ok" ? "ok" : "failed";
+    }
+    if (outcome.note) {
+      notes.push(outcome.note);
     }
   }
 

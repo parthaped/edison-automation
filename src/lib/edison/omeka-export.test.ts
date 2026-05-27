@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildOmekaApiPayload, buildOmekaCsv, buildOmekaCsvRow } from "./omeka-export";
+import { buildOmekaCsv, buildOmekaCsvRow } from "./omeka-export";
 import { sampleMetadata, sampleTranscription } from "./sample-data";
 
 describe("omeka export", () => {
@@ -18,10 +18,10 @@ describe("omeka export", () => {
     expect(csv).toContain('"Letterhead: Edison Electric Light Co. of Philadelphia');
   });
 
-  it("builds Omeka API payload fields", () => {
-    const payload = buildOmekaApiPayload(sampleMetadata, sampleTranscription);
+  it("emits CRLF line terminators for Excel and Omeka compatibility", () => {
+    const csv = buildOmekaCsv([buildOmekaCsvRow(sampleMetadata, sampleTranscription)]);
 
-    expect(payload["dcterms:identifier"][0]["@value"]).toBe("D9032-00001");
-    expect(payload["dcterms:isPartOf"][0]["@value"]).toBe("D9032-F");
+    expect(csv.endsWith("\r\n")).toBe(true);
+    expect(csv.split("\r\n").length).toBeGreaterThan(1);
   });
 });

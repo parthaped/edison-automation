@@ -18,6 +18,7 @@ import type {
 
 export class InMemoryEdisonRepository implements EdisonRepository {
   private boxUploads = new Map<string, BoxUpload>();
+  private boxFileIdIndex = new Map<string, string>();
   private documents = new Map<string, DocumentPackage>();
   private transcriptions = new Map<string, TranscriptionRun>();
   private metadata = new Map<string, MetadataExtraction>();
@@ -44,25 +45,28 @@ export class InMemoryEdisonRepository implements EdisonRepository {
   }
 
   async saveBoxUpload(upload: BoxUpload): Promise<void> {
-    const existing = [...this.boxUploads.values()].find(
-      (candidate) => candidate.boxFileId === upload.boxFileId,
-    );
-    if (existing) {
-      this.boxUploads.set(existing.id, {
-        ...existing,
-        ...upload,
-        id: existing.id,
-        receivedAt: existing.receivedAt,
-        updatedAt: upload.updatedAt,
-      });
-      return;
+    const existingId = this.boxFileIdIndex.get(upload.boxFileId);
+    if (existingId) {
+      const existing = this.boxUploads.get(existingId);
+      if (existing) {
+        this.boxUploads.set(existingId, {
+          ...existing,
+          ...upload,
+          id: existing.id,
+          receivedAt: existing.receivedAt,
+          updatedAt: upload.updatedAt,
+        });
+        return;
+      }
     }
 
     this.boxUploads.set(upload.id, upload);
+    this.boxFileIdIndex.set(upload.boxFileId, upload.id);
   }
 
   async updateBoxUpload(upload: BoxUpload): Promise<void> {
     this.boxUploads.set(upload.id, upload);
+    this.boxFileIdIndex.set(upload.boxFileId, upload.id);
   }
 
   async getBoxUpload(id: string): Promise<BoxUpload | null> {
@@ -78,6 +82,22 @@ export class InMemoryEdisonRepository implements EdisonRepository {
       if (!this.metadata.has(document.documentId)) {
         this.metadata.set(document.documentId, emptyMetadata(document));
       }
+    }
+  }
+
+  async saveProcessedDocuments(
+    documents: DocumentPackage[],
+    transcriptions: TranscriptionRun[],
+    metadata: MetadataExtraction[],
+  ): Promise<void> {
+    for (const document of documents) {
+      this.documents.set(document.documentId, document);
+    }
+    for (const transcription of transcriptions) {
+      this.transcriptions.set(transcription.documentId, transcription);
+    }
+    for (const item of metadata) {
+      this.metadata.set(item.documentId, item);
     }
   }
 
@@ -106,7 +126,7 @@ export class InMemoryEdisonRepository implements EdisonRepository {
 
   async listApprovedExportRows() {
     const approved = [...this.documents.values()].filter(
-      (document) => document.status === "approved" || document.status === "needs_review",
+      (document) => document.status === "approved",
     );
 
     return approved.map((document) => ({
@@ -144,6 +164,7 @@ export class InMemoryEdisonRepository implements EdisonRepository {
   private saveSeedData() {
     for (const upload of sampleBoxUploads) {
       this.boxUploads.set(upload.id, upload);
+      this.boxFileIdIndex.set(upload.boxFileId, upload.id);
     }
     for (const document of sampleDocuments) {
       this.documents.set(document.documentId, document);

@@ -14,6 +14,8 @@ const OMEKA_COLUMNS = [
   "Transcription",
 ] as const;
 
+const CSV_LINE_TERMINATOR = "\r\n";
+
 function serializeCell(value: string): string {
   const escaped = value.replace(/"/g, '""');
   return /[",\n\r]/.test(escaped) ? `"${escaped}"` : escaped;
@@ -50,44 +52,5 @@ export function buildOmekaCsv(
     OMEKA_COLUMNS.map((column) => serializeCell(row[column])).join(","),
   );
 
-  return [header, ...body].join("\n");
-}
-
-export function buildOmekaApiPayload(
-  metadata: MetadataExtraction,
-  transcription: TranscriptionRun,
-) {
-  return {
-    "dcterms:identifier": [{ type: "literal", property_id: 10, "@value": metadata.documentId }],
-    "dcterms:isPartOf": [{ type: "literal", property_id: 33, "@value": metadata.folderId }],
-    "dcterms:type": [{ type: "literal", property_id: 8, "@value": metadata.documentType }],
-    "dcterms:date": [{ type: "literal", property_id: 7, "@value": metadata.date }],
-    "dcterms:creator": metadata.authors.map((author) => ({
-      type: "literal",
-      property_id: 2,
-      "@value": author,
-    })),
-    "bibo:recipient": metadata.recipients.map((recipient) => ({
-      type: "literal",
-      property_id: 77,
-      "@value": recipient,
-    })),
-    "dcterms:relation": metadata.mentionedNames.map((name) => ({
-      type: "literal",
-      property_id: 13,
-      "@value": name,
-    })),
-    "dcterms:subject": metadata.subjects.map((subject) => ({
-      type: "literal",
-      property_id: 3,
-      "@value": subject,
-    })),
-    "dcterms:description": [
-      {
-        type: "html",
-        property_id: 4,
-        "@value": transcription.diplomaticText,
-      },
-    ],
-  };
+  return [header, ...body, ""].join(CSV_LINE_TERMINATOR);
 }

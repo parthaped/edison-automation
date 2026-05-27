@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { scoreConfidence } from "./confidence";
+import { scoreConfidence } from "./service";
 
 describe("scoreConfidence", () => {
   it("blocks packages with extraction errors", () => {

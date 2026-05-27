@@ -27,6 +27,11 @@ export interface ReviewCase {
 export interface EdisonRepository {
   listDocuments(): Promise<DocumentPackage[]>;
   saveDocuments(documents: DocumentPackage[]): Promise<void>;
+  saveProcessedDocuments(
+    documents: DocumentPackage[],
+    transcriptions: TranscriptionRun[],
+    metadata: MetadataExtraction[],
+  ): Promise<void>;
   listBoxUploads(): Promise<BoxUpload[]>;
   saveBoxUpload(upload: BoxUpload): Promise<void>;
   updateBoxUpload(upload: BoxUpload): Promise<void>;

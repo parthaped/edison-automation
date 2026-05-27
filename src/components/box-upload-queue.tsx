@@ -9,6 +9,8 @@ interface BoxUploadQueueProps {
 
 export function BoxUploadQueue({ uploads }: BoxUploadQueueProps) {
   const [statuses, setStatuses] = useState<Record<string, BoxUploadStatus>>({});
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [pending, setPending] = useState<Record<string, boolean>>({});
   const visibleUploads = uploads.filter((upload) =>
     ["available", "queued_for_pipeline"].includes(statuses[upload.id] ?? upload.status),
   );
@@ -17,17 +19,40 @@ export function BoxUploadQueue({ uploads }: BoxUploadQueueProps) {
   );
 
   async function startTranscription(upload: BoxUpload) {
-    const response = await fetch(
-      `/api/box/uploads/${encodeURIComponent(upload.id)}/start-transcription`,
-      { method: "POST" },
-    );
-    if (!response.ok) {
-      throw new Error("Unable to start transcription for this Box upload.");
+    setPending((current) => ({ ...current, [upload.id]: true }));
+    setErrors((current) => {
+      const next = { ...current };
+      delete next[upload.id];
+      return next;
+    });
+    try {
+      const response = await fetch(
+        `/api/box/uploads/${encodeURIComponent(upload.id)}/start-transcription`,
+        { method: "POST" },
+      );
+      if (!response.ok) {
+        const detail = await response.text();
+        throw new Error(
+          detail || `Unable to start transcription (HTTP ${response.status}).`,
+        );
+      }
+      setStatuses((current) => ({
+        ...current,
+        [upload.id]: "queued_for_pipeline",
+      }));
+    } catch (error) {
+      setErrors((current) => ({
+        ...current,
+        [upload.id]:
+          error instanceof Error ? error.message : "Unable to start transcription.",
+      }));
+    } finally {
+      setPending((current) => {
+        const next = { ...current };
+        delete next[upload.id];
+        return next;
+      });
     }
-    setStatuses((current) => ({
-      ...current,
-      [upload.id]: "queued_for_pipeline",
-    }));
   }
 
   return (
@@ -59,40 +84,52 @@ export function BoxUploadQueue({ uploads }: BoxUploadQueueProps) {
         <div className="mt-5 grid gap-3">
           {visibleUploads.map((upload) => {
             const status = statuses[upload.id] ?? upload.status;
+            const isPending = pending[upload.id] === true;
+            const error = errors[upload.id];
+            const buttonLabel = isPending
+              ? "Starting…"
+              : status === "available"
+                ? "Start transcription"
+                : "Queued for pipeline";
             return (
-            <article
-              key={upload.id}
-              className="grid gap-4 rounded-2xl border border-slate-200 bg-slate-50 p-4 lg:grid-cols-[1fr_auto]"
-            >
-              <div>
-                <h3 className="text-lg font-semibold text-slate-950">{upload.fileName}</h3>
-                <dl className="mt-3 grid gap-2 text-sm text-slate-700 md:grid-cols-3">
-                  <div>
-                    <dt className="font-semibold text-slate-500">Box folder</dt>
-                    <dd>{upload.folderName}</dd>
-                  </div>
-                  <div>
-                    <dt className="font-semibold text-slate-500">Folder path</dt>
-                    <dd>{upload.folderPath}</dd>
-                  </div>
-                  <div>
-                    <dt className="font-semibold text-slate-500">Size</dt>
-                    <dd>{formatBytes(upload.fileSize)}</dd>
-                  </div>
-                </dl>
-              </div>
-              <div className="flex items-center">
-                <button
-                  type="button"
-                  disabled={status !== "available"}
-                  onClick={() => void startTranscription(upload)}
-                  className="rounded-full bg-slate-950 px-5 py-3 text-sm font-semibold text-white hover:bg-slate-800 focus:outline-none focus:ring-4 focus:ring-amber-300"
-                >
-                  {status === "available" ? "Start transcription" : "Queued for pipeline"}
-                </button>
-              </div>
-            </article>
-          );
+              <article
+                key={upload.id}
+                className="grid gap-4 rounded-2xl border border-slate-200 bg-slate-50 p-4 lg:grid-cols-[1fr_auto]"
+              >
+                <div>
+                  <h3 className="text-lg font-semibold text-slate-950">{upload.fileName}</h3>
+                  <dl className="mt-3 grid gap-2 text-sm text-slate-700 md:grid-cols-3">
+                    <div>
+                      <dt className="font-semibold text-slate-500">Box folder</dt>
+                      <dd>{upload.folderName}</dd>
+                    </div>
+                    <div>
+                      <dt className="font-semibold text-slate-500">Folder path</dt>
+                      <dd>{upload.folderPath}</dd>
+                    </div>
+                    <div>
+                      <dt className="font-semibold text-slate-500">Size</dt>
+                      <dd>{formatBytes(upload.fileSize)}</dd>
+                    </div>
+                  </dl>
+                  {error ? (
+                    <p role="alert" className="mt-3 text-sm font-semibold text-red-700">
+                      {error}
+                    </p>
+                  ) : null}
+                </div>
+                <div className="flex items-center">
+                  <button
+                    type="button"
+                    disabled={status !== "available" || isPending}
+                    onClick={() => void startTranscription(upload)}
+                    className="rounded-full bg-slate-950 px-5 py-3 text-sm font-semibold text-white hover:bg-slate-800 focus:outline-none focus:ring-4 focus:ring-amber-300 disabled:opacity-60"
+                  >
+                    {buttonLabel}
+                  </button>
+                </div>
+              </article>
+            );
           })}
         </div>
       )}

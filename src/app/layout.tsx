@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { Toaster } from "@/components/ui/sonner";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -17,11 +18,7 @@ export const metadata: Metadata = {
   description:
     "Review, correct, and export Thomas Edison Papers AI transcriptions and indexing metadata.",
   icons: {
-    icon: [
-      { url: "/favicon.ico", sizes: "any" },
-      { url: "/edison-logo.svg", type: "image/svg+xml" },
-    ],
-    shortcut: "/favicon.ico",
+    icon: [{ url: "/favicon.svg", type: "image/svg+xml" }],
   },
 };
 
@@ -35,7 +32,10 @@ export default function RootLayout({
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="flex min-h-full flex-col">{children}</body>
+      <body className="flex min-h-full flex-col bg-background font-sans text-foreground antialiased">
+        {children}
+        <Toaster theme="light" position="bottom-right" richColors closeButton />
+      </body>
     </html>
   );
 }

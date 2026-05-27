@@ -47,12 +47,17 @@ export async function createExtractionPlan(
         pageCount: pdf.getPageCount(),
         warnings: validation.warnings,
       };
-    } catch {
+    } catch (error) {
+      const message = error instanceof Error ? error.message.toLowerCase() : "";
+      const encrypted =
+        message.includes("encrypt") || message.includes("password");
       return {
         kind: validation.kind,
         pageCount: 0,
         warnings: validation.warnings,
-        blockedReason: "PDF could not be opened. It may be corrupt or password protected.",
+        blockedReason: encrypted
+          ? "PDF is password protected."
+          : "PDF could not be opened. It may be corrupt.",
       };
     }
   }

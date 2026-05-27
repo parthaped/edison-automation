@@ -10,7 +10,11 @@ export async function POST(request: Request) {
     const files = formData
       .getAll("files")
       .filter((entry): entry is File => entry instanceof File);
-    const folderId = String(formData.get("folderId") ?? "");
+    const rawFolderId = formData.get("folderId");
+    const folderId =
+      typeof rawFolderId === "string" && rawFolderId.trim() !== ""
+        ? rawFolderId
+        : undefined;
 
     const packages = await getEdisonService().ingestManualFiles({
       files,

@@ -37,7 +37,10 @@ export interface FileValidationInput {
 
 export function getExtension(filename: string): string {
   const parts = filename.toLowerCase().split(".");
-  return parts.length > 1 ? parts.at(-1) ?? "" : "";
+  if (parts.length < 2 || parts[0] === "") {
+    return "";
+  }
+  return parts.at(-1) ?? "";
 }
 
 export function detectKindFromMagic(bytes?: Uint8Array): SupportedFileKind | undefined {

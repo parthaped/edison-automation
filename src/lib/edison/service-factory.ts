@@ -8,7 +8,8 @@ const globalForEdison = globalThis as unknown as {
 
 export function getEdisonService(): EdisonAutomationService {
   if (!globalForEdison.edisonRepository) {
-    globalForEdison.edisonRepository = new InMemoryEdisonRepository(true);
+    const seed = process.env.NODE_ENV !== "production";
+    globalForEdison.edisonRepository = new InMemoryEdisonRepository(seed);
   }
 
   if (!globalForEdison.edisonService) {

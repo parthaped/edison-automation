@@ -60,14 +60,15 @@ export function assignDocumentId(input: AssignDocumentIdInput): AssignedDocument
     }
   }
 
-  let generated = generateDocumentId(
+  const base = generateDocumentId(
     input.folderId,
     input.batchIndex,
     input.generatedPrefix,
   );
+  let generated = base;
   let suffix = 1;
   while (input.existingIds.has(generated)) {
-    generated = `${generateDocumentId(input.folderId, input.batchIndex, input.generatedPrefix)}-${suffix}`;
+    generated = `${base}-${suffix}`;
     suffix += 1;
   }
 

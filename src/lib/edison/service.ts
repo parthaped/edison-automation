@@ -13,11 +13,14 @@ import { summarizeDocuments } from "./repositories";
 import type {
   AgentFeedback,
   BoxUpload,
+  ConfidenceBucket,
   DocumentPackage,
   FeedbackTarget,
+  MetadataExtraction,
   PromptVersion,
   ReviewDecision,
   SourceFile,
+  TranscriptionRun,
 } from "./types";
 
 export interface UploadFileLike {
@@ -55,6 +58,143 @@ export interface BoxWebhookEvent {
   };
 }
 
+export interface ProcessSourceFileInput {
+  sourceFile: SourceFile;
+  bytes: Uint8Array;
+  folderId?: string;
+  batchIndex: number;
+  existingIds: Set<string>;
+  rawOcrText?: string;
+  model?: string;
+}
+
+export interface ProcessSourceFileResult {
+  documentPackage: DocumentPackage;
+  transcription: TranscriptionRun;
+  metadata: MetadataExtraction;
+  confidence: ConfidenceBucket;
+  confidenceReasons: string[];
+}
+
+interface ConfidenceInput {
+  pageCount: number;
+  extractionErrors: number;
+  uncertainReadings: number;
+  modelDisagreements: number;
+  ocrTextLength: number;
+}
+
+interface ConfidenceResult {
+  bucket: ConfidenceBucket;
+  score: number;
+  reasons: string[];
+}
+
+export function scoreConfidence(input: ConfidenceInput): ConfidenceResult {
+  const reasons: string[] = [];
+
+  if (input.extractionErrors > 0 || input.pageCount === 0) {
+    return {
+      bucket: "blocked",
+      score: 0,
+      reasons: ["Extraction failed or produced no reviewable pages."],
+    };
+  }
+
+  let score = 100;
+
+  if (input.ocrTextLength < 80) {
+    score -= 25;
+    reasons.push("OCR text is very short for the extracted page count.");
+  }
+
+  if (input.uncertainReadings > 0) {
+    const penalty = Math.min(30, input.uncertainReadings * 4);
+    score -= penalty;
+    reasons.push(`${input.uncertainReadings} uncertain readings need review.`);
+  }
+
+  if (input.modelDisagreements > 0) {
+    const penalty = Math.min(25, input.modelDisagreements * 8);
+    score -= penalty;
+    reasons.push(`${input.modelDisagreements} model disagreements were detected.`);
+  }
+
+  if (input.pageCount > 20) {
+    score -= 5;
+    reasons.push("Large document packages receive extra review scrutiny.");
+  }
+
+  const bucket: ConfidenceBucket =
+    score >= 85 ? "high" : score >= 55 ? "medium" : "low";
+
+  return {
+    bucket,
+    score: Math.max(0, score),
+    reasons: reasons.length > 0 ? reasons : ["Clean extraction and low uncertainty."],
+  };
+}
+
+function extractUncertainReadings(text: string): string[] {
+  return text.match(/\[[^\]]+\?\]/g) ?? [];
+}
+
+export async function processSourceFile(
+  input: ProcessSourceFileInput,
+): Promise<ProcessSourceFileResult> {
+  const documentPackage = await createDocumentPackage({
+    sourceFile: input.sourceFile,
+    bytes: input.bytes,
+    folderId: input.folderId,
+    batchIndex: input.batchIndex,
+    existingIds: input.existingIds,
+  });
+
+  const blocked = documentPackage.status === "blocked";
+  const rawOcrText = input.rawOcrText ?? "";
+  const cleanedText = rawOcrText.trim();
+  const uncertainReadings = blocked ? [] : extractUncertainReadings(cleanedText);
+  const confidenceResult = scoreConfidence({
+    pageCount: documentPackage.pages.length,
+    extractionErrors: blocked ? 1 : 0,
+    uncertainReadings: uncertainReadings.length,
+    modelDisagreements: 0,
+    ocrTextLength: cleanedText.length,
+  });
+
+  const diplomaticPrompt = getActivePrompt("diplomatic-transcription");
+  const transcription: TranscriptionRun = {
+    id: `${documentPackage.documentId}-run-1`,
+    documentId: documentPackage.documentId,
+    model: input.model ?? "gateway-configured-model",
+    promptVersion: diplomaticPrompt.version,
+    ocrText: rawOcrText,
+    diplomaticText: cleanedText,
+    uncertainReadings,
+  };
+
+  const metadata: MetadataExtraction = {
+    folderId: documentPackage.folderId,
+    documentId: documentPackage.documentId,
+    documentType: "Unknown",
+    date: "Unknown",
+    authors: [],
+    recipients: [],
+    mentionedNames: [],
+    subjects: blocked ? [] : ["Needs review"],
+    imageNames: documentPackage.pages.map((page) => page.imageFilename),
+    confidence: confidenceResult.bucket,
+  };
+
+  return {
+    documentPackage,
+    transcription,
+    metadata,
+    confidence: confidenceResult.bucket,
+    confidenceReasons: confidenceResult.reasons,
+  };
+}
+
 export class EdisonAutomationService {
   constructor(private readonly repository: EdisonRepository) {}
 
@@ -84,27 +224,31 @@ export class EdisonAutomationService {
       (await this.repository.listDocuments()).map((document) => document.documentId),
     );
     const packages: DocumentPackage[] = [];
+    const transcriptions: TranscriptionRun[] = [];
+    const metadata: MetadataExtraction[] = [];
 
     for (const [index, file] of input.files.entries()) {
       const bytes = new Uint8Array(await file.arrayBuffer());
       const sourceFile: SourceFile = {
-        id: `manual-${Date.now()}-${index + 1}`,
+        id: crypto.randomUUID(),
         name: file.name,
         size: file.size,
         mimeType: file.type || "application/octet-stream",
       };
-      const documentPackage = await createDocumentPackage({
+      const processed = await processSourceFile({
         sourceFile,
         bytes,
         folderId: input.folderId,
         batchIndex: index + 1,
         existingIds,
       });
-      existingIds.add(documentPackage.documentId);
-      packages.push(documentPackage);
+      existingIds.add(processed.documentPackage.documentId);
+      packages.push(processed.documentPackage);
+      transcriptions.push(processed.transcription);
+      metadata.push(processed.metadata);
     }
 
-    await this.repository.saveDocuments(packages);
+    await this.repository.saveProcessedDocuments(packages, transcriptions, metadata);
     return packages;
   }
 
@@ -176,29 +320,20 @@ export class EdisonAutomationService {
     return {
       accepted: true,
       upload: updated,
-      pipelineJob: {
-        id: `transcription-job-${upload.boxFileId}`,
-        boxFileId: upload.boxFileId,
-        folderId: upload.folderId,
-        folderName: upload.folderName,
-        fileName: upload.fileName,
-        steps: [
-          "download-from-box",
-          "validate-file",
-          "extract-pages",
-          "assign-document-id",
-          "run-agi-transcription-pipeline",
-          "score-confidence",
-          "publish-to-review-queue",
-        ],
-      },
+      pendingSteps: ["fetch-from-box-bytes", "run-pipeline"],
+      note:
+        "Byte fetch is performed by a Box worker; the unified pipeline runs once bytes are available.",
     };
   }
 
   async exportOmekaCsv(): Promise<string> {
     const rows = await this.repository.listApprovedExportRows();
     if (rows.length === 0) {
-      throw new AppError("EXPORT_FAILED", "No approved or reviewable records are available for export.", 409);
+      throw new AppError(
+        "EXPORT_FAILED",
+        "No approved records are available for export.",
+        409,
+      );
     }
 
     return buildOmekaCsv(
@@ -261,8 +396,20 @@ export class EdisonAutomationService {
     return feedback;
   }
 
+  async previewAgentImprovementDraft(task: PromptVersion["task"]) {
+    return this.buildAgentImprovementDraft(task, { persist: false });
+  }
+
   async generateAgentImprovementDraft(task: PromptVersion["task"]) {
-    const feedback = (await this.repository.listAgentFeedback()).filter(
+    return this.buildAgentImprovementDraft(task, { persist: true });
+  }
+
+  private async buildAgentImprovementDraft(
+    task: PromptVersion["task"],
+    options: { persist: boolean },
+  ) {
+    const allFeedback = await this.repository.listAgentFeedback();
+    const promptFeedback = allFeedback.filter(
       (item) => item.target === "prompt" || item.target === "transcription",
     );
     const activePrompt = getActivePrompt(task);
@@ -270,16 +417,16 @@ export class EdisonAutomationService {
       task,
       basePromptVersion: activePrompt.version,
       basePrompt: activePrompt.prompt,
-      feedback,
+      feedback: promptFeedback,
     });
-    const calibrations = suggestConfidenceCalibrations(
-      await this.repository.listAgentFeedback(),
-    );
+    const calibrations = suggestConfidenceCalibrations(allFeedback);
 
-    await this.repository.savePromptRevisionCandidate(candidate);
+    if (options.persist) {
+      await this.repository.savePromptRevisionCandidate(candidate);
+    }
 
     return {
-      summary: summarizeFeedback(feedback),
+      summary: summarizeFeedback(promptFeedback),
       candidate,
       calibrations,
       agentScript: buildAgentImprovementScript({ candidate, calibrations }),
