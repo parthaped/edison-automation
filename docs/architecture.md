@@ -12,15 +12,17 @@ Render remains the fallback if the image/OCR worker layer needs always-on Python
 
 ## Processing Flow
 
-1. Box webhook or manual upload creates an ingest event.
-2. File validation determines whether the source can be extracted or must be routed to manual review.
-3. Extraction creates a page manifest and deterministic image filenames.
-4. The ID policy preserves supplied identifiers or generates collision-free temporary identifiers.
-5. OCR and AI transcription run in staged prompts.
-6. Confidence scoring routes packages to high, medium, low, or blocked queues.
-7. Reviewers correct transcription and metadata in the workbench.
-8. Reviewer corrections are captured as structured feedback for agent improvement.
-9. Approved records export to Omeka-compatible CSV/API payloads.
+1. Box webhook records completed uploads and their associated folder/path in the Box intake queue.
+2. A platform user reviews the Box intake queue and clicks **Start transcription** for the file or folder set that is ready.
+3. The start action queues the AGI/transcription pipeline job. The webhook itself does not download or process files.
+4. File validation determines whether the source can be extracted or must be routed to manual review.
+5. Extraction creates a page manifest and deterministic image filenames.
+6. The ID policy preserves supplied identifiers or generates collision-free temporary identifiers.
+7. OCR and AI transcription run in staged prompts.
+8. Confidence scoring routes packages to high, medium, low, or blocked queues.
+9. Reviewers correct transcription and metadata in the workbench.
+10. Reviewer corrections are captured as structured feedback for agent improvement.
+11. Approved records export to Omeka-compatible CSV/API payloads.
 
 ## Service Boundaries
 

@@ -56,17 +56,41 @@ describe("EdisonAutomationService", () => {
     expect(csv).toContain("D9032-F");
   });
 
-  it("converts Box upload events to queue jobs without downloading in the webhook request", () => {
-    const service = new EdisonAutomationService(new InMemoryEdisonRepository(false));
+  it("records Box upload events without starting transcription", async () => {
+    const repository = new InMemoryEdisonRepository(false);
+    const service = new EdisonAutomationService(repository);
 
-    const result = service.handleBoxWebhook({
+    const result = await service.handleBoxWebhook({
+      id: "event-1",
+      trigger: "FILE.UPLOADED",
+      source: {
+        id: "file-1",
+        type: "file",
+        name: "scan.pdf",
+        parent: { id: "folder-1", name: "D9032-F" },
+      },
+    });
+
+    expect(result.recorded).toBe(true);
+    expect(result.queued).toBe(false);
+    expect((await repository.listBoxUploads())[0].folderName).toBe("D9032-F");
+  });
+
+  it("starts transcription only after user action", async () => {
+    const repository = new InMemoryEdisonRepository(false);
+    const service = new EdisonAutomationService(repository);
+
+    await service.handleBoxWebhook({
       id: "event-1",
       trigger: "FILE.UPLOADED",
       source: { id: "file-1", type: "file", name: "scan.pdf" },
     });
 
-    expect(result.queued).toBe(true);
-    expect(result.job?.boxFileId).toBe("file-1");
+    const result = await service.startTranscriptionForBoxUpload("box-upload-file-1");
+
+    expect(result.accepted).toBe(true);
+    expect(result.upload.status).toBe("queued_for_pipeline");
+    expect(result.pipelineJob.steps).toContain("run-agi-transcription-pipeline");
   });
 
   it("records feedback and generates an agent improvement draft", async () => {

@@ -1,5 +1,6 @@
 import type {
   AgentFeedback,
+  BoxUpload,
   DocumentPackage,
   MetadataExtraction,
   PromptRevisionCandidate,
@@ -13,6 +14,7 @@ export interface DashboardSummary {
   mediumConfidence: number;
   blocked: number;
   readyToExport: number;
+  pendingBoxUploads: number;
 }
 
 export interface ReviewCase {
@@ -25,6 +27,10 @@ export interface ReviewCase {
 export interface EdisonRepository {
   listDocuments(): Promise<DocumentPackage[]>;
   saveDocuments(documents: DocumentPackage[]): Promise<void>;
+  listBoxUploads(): Promise<BoxUpload[]>;
+  saveBoxUpload(upload: BoxUpload): Promise<void>;
+  updateBoxUpload(upload: BoxUpload): Promise<void>;
+  getBoxUpload(id: string): Promise<BoxUpload | null>;
   getReviewCase(documentId?: string): Promise<ReviewCase | null>;
   listApprovedExportRows(): Promise<
     Array<{
@@ -39,12 +45,16 @@ export interface EdisonRepository {
   listPromptRevisionCandidates(): Promise<PromptRevisionCandidate[]>;
 }
 
-export function summarizeDocuments(documents: DocumentPackage[]): DashboardSummary {
+export function summarizeDocuments(
+  documents: DocumentPackage[],
+  boxUploads: BoxUpload[] = [],
+): DashboardSummary {
   return {
     total: documents.length,
     lowConfidence: documents.filter((document) => document.confidence === "low").length,
     mediumConfidence: documents.filter((document) => document.confidence === "medium").length,
     blocked: documents.filter((document) => document.status === "blocked").length,
     readyToExport: documents.filter((document) => document.status === "approved").length,
+    pendingBoxUploads: boxUploads.filter((upload) => upload.status === "available").length,
   };
 }

@@ -1,11 +1,12 @@
 import { AlertTriangle, Archive, CheckCircle2, Clock, FileWarning } from "lucide-react";
 import Image from "next/image";
 import type { ReactNode } from "react";
+import { BoxUploadQueue } from "@/components/box-upload-queue";
 import { ReviewerWorkbench } from "@/components/reviewer-workbench";
 import { getEdisonService } from "@/lib/edison/service-factory";
 
 export default async function Home() {
-  const { summary, reviewCase } = await getEdisonService().getDashboard();
+  const { summary, boxUploads, reviewCase } = await getEdisonService().getDashboard();
 
   return (
     <main className="min-h-screen bg-slate-100 px-4 py-6 text-slate-950 sm:px-6 lg:px-8">
@@ -66,9 +67,9 @@ export default async function Home() {
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
             <QueueCard
               icon={<FileWarning aria-hidden="true" />}
-              label="Low confidence"
-              count={summary.lowConfidence}
-              detail="Requires careful human review before export."
+              label="New Box uploads"
+              count={summary.pendingBoxUploads}
+              detail="Completed Box uploads waiting for Start transcription."
             />
             <QueueCard
               icon={<Clock aria-hidden="true" />}
@@ -90,6 +91,8 @@ export default async function Home() {
             />
           </div>
         </section>
+
+        <BoxUploadQueue uploads={boxUploads} />
 
         <section className="grid gap-4 lg:grid-cols-[1fr_360px]">
           <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">

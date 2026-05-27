@@ -14,6 +14,25 @@ const boxWebhookSchema = z.object({
     name: z.string().optional(),
     size: z.number().optional(),
     sha1: z.string().optional(),
+    parent: z
+      .object({
+        id: z.string(),
+        name: z.string(),
+      })
+      .optional(),
+    path_collection: z
+      .object({
+        entries: z
+          .array(
+            z.object({
+              id: z.string(),
+              name: z.string(),
+              type: z.string().optional(),
+            }),
+          )
+          .optional(),
+      })
+      .optional(),
   }),
 });
 
@@ -28,7 +47,7 @@ export async function POST(request: Request) {
       );
     }
 
-    return NextResponse.json(getEdisonService().handleBoxWebhook(payload.data));
+    return NextResponse.json(await getEdisonService().handleBoxWebhook(payload.data));
   } catch (error) {
     const response = toErrorResponse(error);
     return NextResponse.json(response.body, { status: response.status });

@@ -1,4 +1,5 @@
 import {
+  sampleBoxUploads,
   sampleDocuments,
   sampleMetadata,
   sampleReviewEvents,
@@ -7,6 +8,7 @@ import {
 import type { EdisonRepository, ReviewCase } from "./repositories";
 import type {
   AgentFeedback,
+  BoxUpload,
   DocumentPackage,
   MetadataExtraction,
   PromptRevisionCandidate,
@@ -15,6 +17,7 @@ import type {
 } from "./types";
 
 export class InMemoryEdisonRepository implements EdisonRepository {
+  private boxUploads = new Map<string, BoxUpload>();
   private documents = new Map<string, DocumentPackage>();
   private transcriptions = new Map<string, TranscriptionRun>();
   private metadata = new Map<string, MetadataExtraction>();
@@ -32,6 +35,38 @@ export class InMemoryEdisonRepository implements EdisonRepository {
     return [...this.documents.values()].sort((a, b) =>
       a.updatedAt < b.updatedAt ? 1 : -1,
     );
+  }
+
+  async listBoxUploads(): Promise<BoxUpload[]> {
+    return [...this.boxUploads.values()].sort((a, b) =>
+      a.receivedAt < b.receivedAt ? 1 : -1,
+    );
+  }
+
+  async saveBoxUpload(upload: BoxUpload): Promise<void> {
+    const existing = [...this.boxUploads.values()].find(
+      (candidate) => candidate.boxFileId === upload.boxFileId,
+    );
+    if (existing) {
+      this.boxUploads.set(existing.id, {
+        ...existing,
+        ...upload,
+        id: existing.id,
+        receivedAt: existing.receivedAt,
+        updatedAt: upload.updatedAt,
+      });
+      return;
+    }
+
+    this.boxUploads.set(upload.id, upload);
+  }
+
+  async updateBoxUpload(upload: BoxUpload): Promise<void> {
+    this.boxUploads.set(upload.id, upload);
+  }
+
+  async getBoxUpload(id: string): Promise<BoxUpload | null> {
+    return this.boxUploads.get(id) ?? null;
   }
 
   async saveDocuments(documents: DocumentPackage[]): Promise<void> {
@@ -107,6 +142,9 @@ export class InMemoryEdisonRepository implements EdisonRepository {
   }
 
   private saveSeedData() {
+    for (const upload of sampleBoxUploads) {
+      this.boxUploads.set(upload.id, upload);
+    }
     for (const document of sampleDocuments) {
       this.documents.set(document.documentId, document);
     }

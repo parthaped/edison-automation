@@ -1,4 +1,5 @@
 import type {
+  BoxUpload,
   DocumentPackage,
   MetadataExtraction,
   ReviewEvent,
@@ -7,6 +8,23 @@ import type {
 
 // Development seed data only. Runtime code should access records through the
 // EdisonRepository interface so this can be replaced by Postgres/object storage.
+export const sampleBoxUploads: BoxUpload[] = [
+  {
+    id: "box-upload-987654321",
+    webhookEventId: "box-event-1",
+    boxFileId: "987654321",
+    fileName: "D9032-00002.pdf",
+    fileSize: 4_720_000,
+    checksum: "sample-sha1",
+    folderId: "box-folder-D9032",
+    folderName: "D9032-F Electric Light Philadelphia",
+    folderPath: "Thomas Edison Papers / Incoming / D9032-F Electric Light Philadelphia",
+    status: "available",
+    receivedAt: "2026-05-27T13:45:00.000Z",
+    updatedAt: "2026-05-27T13:45:00.000Z",
+  },
+];
+
 export const sampleDocuments: DocumentPackage[] = [
   {
     id: "D9032-00001",

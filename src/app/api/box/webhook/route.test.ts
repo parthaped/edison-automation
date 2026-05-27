@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { POST } from "./route";
 
 describe("Box webhook route", () => {
-  it("queues FILE.UPLOADED events", async () => {
+  it("records FILE.UPLOADED events without starting transcription", async () => {
     const request = new Request("https://example.test/api/box/webhook", {
       method: "POST",
       body: JSON.stringify({
@@ -14,6 +14,7 @@ describe("Box webhook route", () => {
           name: "D9032-00001.pdf",
           size: 100,
           sha1: "abc",
+          parent: { id: "folder-1", name: "D9032-F" },
         },
       }),
     });
@@ -22,8 +23,10 @@ describe("Box webhook route", () => {
     const body = await response.json();
 
     expect(response.status).toBe(200);
-    expect(body.queued).toBe(true);
-    expect(body.job.boxFileId).toBe("file-1");
+    expect(body.recorded).toBe(true);
+    expect(body.queued).toBe(false);
+    expect(body.upload.boxFileId).toBe("file-1");
+    expect(body.upload.folderName).toBe("D9032-F");
   });
 
   it("ignores non-upload events", async () => {
@@ -40,6 +43,7 @@ describe("Box webhook route", () => {
     const body = await response.json();
 
     expect(response.status).toBe(200);
+    expect(body.recorded).toBe(false);
     expect(body.queued).toBe(false);
   });
 });

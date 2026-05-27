@@ -12,6 +12,7 @@ import type { EdisonRepository } from "./repositories";
 import { summarizeDocuments } from "./repositories";
 import type {
   AgentFeedback,
+  BoxUpload,
   DocumentPackage,
   FeedbackTarget,
   PromptVersion,
@@ -40,6 +41,17 @@ export interface BoxWebhookEvent {
     name?: string;
     size?: number;
     sha1?: string;
+    parent?: {
+      id: string;
+      name: string;
+    };
+    path_collection?: {
+      entries?: Array<{
+        id: string;
+        name: string;
+        type?: string;
+      }>;
+    };
   };
 }
 
@@ -48,11 +60,13 @@ export class EdisonAutomationService {
 
   async getDashboard() {
     const documents = await this.repository.listDocuments();
+    const boxUploads = await this.repository.listBoxUploads();
     const reviewCase = await this.repository.getReviewCase();
 
     return {
-      summary: summarizeDocuments(documents),
+      summary: summarizeDocuments(documents, boxUploads),
       documents,
+      boxUploads,
       reviewCase,
     };
   }
@@ -94,23 +108,89 @@ export class EdisonAutomationService {
     return packages;
   }
 
-  handleBoxWebhook(event: BoxWebhookEvent) {
+  async handleBoxWebhook(event: BoxWebhookEvent) {
     if (event.trigger !== "FILE.UPLOADED") {
       return {
         accepted: true,
+        recorded: false,
         queued: false,
         reason: `Ignored unsupported trigger ${event.trigger}.`,
       };
     }
 
+    const now = new Date().toISOString();
+    const pathEntries = event.source.path_collection?.entries ?? [];
+    const parent = event.source.parent ?? pathEntries.at(-1);
+    const folderName = parent?.name ?? "Unassigned Box folder";
+    const folderPath =
+      pathEntries.length > 0
+        ? pathEntries.map((entry) => entry.name).concat(folderName).join(" / ")
+        : folderName;
+    const upload: BoxUpload = {
+      id: `box-upload-${event.source.id}`,
+      webhookEventId: event.id,
+      boxFileId: event.source.id,
+      fileName: event.source.name ?? "Unknown",
+      fileSize: event.source.size,
+      checksum: event.source.sha1,
+      folderId: parent?.id,
+      folderName,
+      folderPath,
+      status: "available",
+      receivedAt: now,
+      updatedAt: now,
+    };
+
+    await this.repository.saveBoxUpload(upload);
+
     return {
       accepted: true,
-      queued: true,
-      job: {
-        webhookEventId: event.id,
-        boxFileId: event.source.id,
-        fileName: event.source.name ?? "Unknown",
-        checksum: event.source.sha1,
+      recorded: true,
+      queued: false,
+      upload,
+      nextAction: "User must click Start transcription in the platform.",
+    };
+  }
+
+  async startTranscriptionForBoxUpload(uploadId: string) {
+    const upload = await this.repository.getBoxUpload(uploadId);
+    if (!upload) {
+      throw new AppError("NOT_FOUND", "Box upload was not found.", 404);
+    }
+
+    if (upload.status !== "available" && upload.status !== "selected_for_transcription") {
+      throw new AppError(
+        "BAD_REQUEST",
+        `Box upload cannot be started from status ${upload.status}.`,
+        409,
+      );
+    }
+
+    const updated: BoxUpload = {
+      ...upload,
+      status: "queued_for_pipeline",
+      updatedAt: new Date().toISOString(),
+    };
+    await this.repository.updateBoxUpload(updated);
+
+    return {
+      accepted: true,
+      upload: updated,
+      pipelineJob: {
+        id: `transcription-job-${upload.boxFileId}`,
+        boxFileId: upload.boxFileId,
+        folderId: upload.folderId,
+        folderName: upload.folderName,
+        fileName: upload.fileName,
+        steps: [
+          "download-from-box",
+          "validate-file",
+          "extract-pages",
+          "assign-document-id",
+          "run-agi-transcription-pipeline",
+          "score-confidence",
+          "publish-to-review-queue",
+        ],
       },
     };
   }

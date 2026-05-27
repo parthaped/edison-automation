@@ -19,6 +19,13 @@ export type ProcessingStatus =
   | "exported"
   | "blocked";
 
+export type BoxUploadStatus =
+  | "available"
+  | "selected_for_transcription"
+  | "queued_for_pipeline"
+  | "imported"
+  | "ignored";
+
 export type ReviewDecision =
   | "edited_transcription"
   | "marked_uncertain"
@@ -36,6 +43,21 @@ export interface SourceFile {
   mimeType: string;
   boxFileId?: string;
   checksum?: string;
+}
+
+export interface BoxUpload {
+  id: string;
+  webhookEventId: string;
+  boxFileId: string;
+  fileName: string;
+  fileSize?: number;
+  checksum?: string;
+  folderId?: string;
+  folderName: string;
+  folderPath: string;
+  status: BoxUploadStatus;
+  receivedAt: string;
+  updatedAt: string;
 }
 
 export interface ValidationResult {

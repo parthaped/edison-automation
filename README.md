@@ -12,7 +12,7 @@ Edison Automation is designed as a maintainable production service, not a demo. 
 
 ## What This Builds
 
-- Box/manual ingest endpoints for archival batches.
+- Box/manual ingest endpoints for archival batches. Box uploads are discovered first and require a user to click **Start transcription** before the expensive pipeline begins.
 - File validation and extraction planning for PDFs, images, TIFFs, DOCX, CSVs, and Omeka media exports.
 - Deterministic folder/document ID assignment with collision handling.
 - Cost-aware AI transcription pipeline scaffolding with versioned prompts.
@@ -49,7 +49,8 @@ npm test
 - `/` - reviewer dashboard and side-by-side correction workbench.
 - `/api/health` - deployment health check.
 - `/api/ingest/manual` - multipart manual file ingest.
-- `/api/box/webhook` - Box `FILE.UPLOADED` webhook receiver.
+- `/api/box/webhook` - Box `FILE.UPLOADED` receiver that records completed uploads without starting transcription.
+- `/api/box/uploads/[uploadId]/start-transcription` - user-initiated start point for the AGI/transcription pipeline.
 - `/api/review-actions` - review audit event receiver.
 - `/api/agent-feedback` - structured reviewer correction feedback for improving agents.
 - `/api/agent-improvements` - draft prompt/script improvement generator from accumulated feedback.
@@ -64,3 +65,7 @@ Do not import `sample-data.ts` from routes or production UI. It is seed data for
 ## Feedback-Guided Agent Improvement
 
 Reviewer corrections are stored as structured `AgentFeedback` records. The feedback engine groups recurring issues, proposes prompt/script changes, and suggests confidence calibration updates. These are drafts only: promotion requires benchmark evaluation and human approval before a prompt is marked active.
+
+## Box Intake Flow
+
+Box is treated as a source of completed uploads, not as an automatic processing trigger. When Box sends a `FILE.UPLOADED` webhook, the platform records the file, folder, path, size, and checksum in the Box intake queue. Staff can review the incoming upload list in the web app and explicitly click **Start transcription** when a folder or file set is ready. That action queues the proper pipeline steps: Box download, validation, page extraction, document ID assignment, AGI transcription, confidence scoring, and publication to the human review queue.
