@@ -31,12 +31,14 @@ export default async function ViewerPage({ params }: ViewerPageProps) {
     notFound();
   }
 
+  const transcription = reviewCase.transcriptions[document.documentId];
+
   return (
-    <main className="flex min-h-screen flex-col bg-background p-3 sm:p-6">
+    <main className="flex h-[100svh] flex-col overflow-hidden bg-background p-3 sm:p-6">
       <DocumentViewer
         document={document}
-        transcription={reviewCase.transcription}
-        className="flex-1"
+        transcription={transcription}
+        className="min-h-0 flex-1"
       />
     </main>
   );

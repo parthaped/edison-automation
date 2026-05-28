@@ -8,13 +8,20 @@ import {
   sampleTranscription,
 } from "@/lib/edison/sample-data";
 
+const transcriptionsById = {
+  [sampleTranscription.documentId]: sampleTranscription,
+};
+const metadataById = {
+  [sampleMetadata.documentId]: sampleMetadata,
+};
+
 describe("ReviewerWorkbench", () => {
   it("renders document identifiers and editable transcription", () => {
     render(
       <ReviewerWorkbench
         documents={[sampleDocuments[0]]}
-        transcription={sampleTranscription}
-        metadata={sampleMetadata}
+        transcriptions={transcriptionsById}
+        metadata={metadataById}
       />,
     );
 
@@ -30,8 +37,8 @@ describe("ReviewerWorkbench", () => {
     render(
       <ReviewerWorkbench
         documents={[sampleDocuments[0]]}
-        transcription={sampleTranscription}
-        metadata={sampleMetadata}
+        transcriptions={transcriptionsById}
+        metadata={metadataById}
       />,
     );
 
@@ -46,8 +53,8 @@ describe("ReviewerWorkbench", () => {
     render(
       <ReviewerWorkbench
         documents={[sampleDocuments[2]]}
-        transcription={sampleTranscription}
-        metadata={sampleMetadata}
+        transcriptions={transcriptionsById}
+        metadata={metadataById}
       />,
     );
 
@@ -58,8 +65,8 @@ describe("ReviewerWorkbench", () => {
     render(
       <ReviewerWorkbench
         documents={[sampleDocuments[0]]}
-        transcription={sampleTranscription}
-        metadata={sampleMetadata}
+        transcriptions={transcriptionsById}
+        metadata={metadataById}
       />,
     );
 

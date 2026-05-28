@@ -9,7 +9,6 @@ const STAGE_ORDER: FileStage[] = [
   "uploaded",
   "fetching",
   "transcribing",
-  "indexing",
   "saving",
   "done",
 ];
@@ -19,7 +18,6 @@ const STAGE_LABEL: Record<FileStage, string> = {
   uploaded: "Uploaded",
   fetching: "Fetching",
   transcribing: "Transcribing",
-  indexing: "Indexing",
   saving: "Saving",
   done: "Done",
   failed: "Failed",

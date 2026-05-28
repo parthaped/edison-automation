@@ -1,4 +1,3 @@
-import { del } from "@vercel/blob";
 import {
   FatalError,
   RetryableError,
@@ -12,12 +11,11 @@ import type {
 } from "../service";
 import { getEdisonService } from "../service-factory";
 import {
-  extractMetadata,
   isTranscribableMediaType,
   transcribeDocument,
+  type TranscribedMetadata,
 } from "../transcribe";
 import type {
-  ConfidenceBucket,
   DocumentPackage,
   MetadataExtraction,
   SourceFile,
@@ -109,8 +107,9 @@ export async function batchIngestWorkflow(
     failures,
     aggregated,
   });
-  await cleanupBlobsStep(input.blobs.map((blob) => blob.url));
 
+  // Source blobs are intentionally retained: image pages reference the blob URL
+  // so the side-by-side viewer can render the original document.
   return aggregated;
 }
 
@@ -135,8 +134,6 @@ async function processOneFile(input: ProcessOneFileInput): Promise<FileResult> {
   const { folderId, blob, promptTask, batchIndex, aiEnabled } = input;
 
   const transcribed = await transcribeFileStep({ blob, promptTask, aiEnabled });
-  const willIndex =
-    aiEnabled && Boolean(transcribed.ocrText && transcribed.ocrText.trim());
 
   const persisted = await persistFileStep({
     folderId,
@@ -146,33 +143,16 @@ async function processOneFile(input: ProcessOneFileInput): Promise<FileResult> {
     model: transcribed.model,
     inputTokens: transcribed.inputTokens,
     outputTokens: transcribed.outputTokens,
-    willIndex,
+    metadata: transcribed.metadata,
   });
-
-  const errors: TranscriptionError[] = [...transcribed.errors];
-  let metadata = persisted.metadata;
-
-  if (willIndex) {
-    const indexed = await metadataFileStep({
-      fileName: blob.name,
-      documentId: persisted.documentPackage.documentId,
-      folderId: persisted.documentPackage.folderId,
-      imageNames: persisted.imageNames,
-      ocrText: transcribed.ocrText as string,
-      confidence: persisted.confidence,
-      baseMetadata: persisted.metadata,
-    });
-    metadata = indexed.metadata;
-    errors.push(...indexed.errors);
-  }
 
   return {
     fileName: blob.name,
     documentId: persisted.documentPackage.documentId,
     documentPackage: persisted.documentPackage,
     transcription: persisted.transcription,
-    metadata,
-    errors,
+    metadata: persisted.metadata,
+    errors: transcribed.errors,
   };
 }
 
@@ -206,10 +186,13 @@ interface TranscribeFileStepResult {
   model?: string;
   inputTokens?: number;
   outputTokens?: number;
+  metadata?: TranscribedMetadata;
   errors: TranscriptionError[];
 }
 
-// Step 1: fetch the blob and run the OCR/HTR model (the only AI call here).
+// Step 1: fetch the blob and run the single OCR/HTR + indexing model call. This
+// is the only AI request per file; metadata is produced in the same call so a
+// rate-limited index can never fail a file on its own.
 async function transcribeFileStep(
   input: TranscribeFileStepInput,
 ): Promise<TranscribeFileStepResult> {
@@ -246,6 +229,7 @@ async function transcribeFileStep(
         model: transcribed.model,
         inputTokens: transcribed.inputTokens,
         outputTokens: transcribed.outputTokens,
+        metadata: transcribed.metadata,
         errors,
       };
     } catch (error) {
@@ -270,24 +254,24 @@ interface PersistFileStepInput {
   model?: string;
   inputTokens?: number;
   outputTokens?: number;
-  willIndex: boolean;
+  metadata?: TranscribedMetadata;
 }
 
 interface PersistFileStepResult {
   documentPackage: DocumentPackage;
   transcription: TranscriptionRun;
   metadata: MetadataExtraction;
-  confidence: ConfidenceBucket;
-  imageNames: string[];
 }
 
-// Step 2: extract pages and persist the document (no AI call).
+// Step 2: extract pages, merge the folded metadata, and persist the document
+// (no AI call). Source image URLs from the retained blob are attached so the
+// viewer can render the original alongside the transcription.
 async function persistFileStep(
   input: PersistFileStepInput,
 ): Promise<PersistFileStepResult> {
   "use step";
 
-  const { folderId, blob, batchIndex, ocrText, model, willIndex } = input;
+  const { folderId, blob, batchIndex, ocrText, model } = input;
 
   await emitEvent({
     type: "file-stage",
@@ -317,6 +301,7 @@ async function persistFileStep(
     existingIds,
     rawOcrText: ocrText,
     model,
+    sourceUrl: blob.url,
   });
 
   const transcription: TranscriptionRun = {
@@ -329,97 +314,33 @@ async function persistFileStep(
       ? { ...processed.documentPackage, status: "needs_review" }
       : processed.documentPackage;
 
-  await repository.saveProcessedDocument(
-    documentPackage,
-    transcription,
-    processed.metadata,
-  );
+  // Merge the structured metadata the model returned in the transcription call.
+  const metadata: MetadataExtraction = input.metadata
+    ? {
+        ...processed.metadata,
+        documentType: input.metadata.documentType || "Unknown",
+        date: input.metadata.date || "Unknown",
+        authors: input.metadata.authors,
+        recipients: input.metadata.recipients,
+        mentionedNames: input.metadata.mentionedNames,
+        subjects: input.metadata.subjects,
+      }
+    : processed.metadata;
 
-  if (!willIndex) {
-    await emitEvent({
-      type: "file-completed",
-      fileName: blob.name,
-      documentId: documentPackage.documentId,
-      at: new Date().toISOString(),
-    });
-    console.info("[batch-ingest] file:done", {
-      fileName: blob.name,
-      documentId: documentPackage.documentId,
-    });
-  }
-
-  return {
-    documentPackage,
-    transcription,
-    metadata: processed.metadata,
-    confidence: processed.confidence,
-    imageNames: processed.metadata.imageNames,
-  };
-}
-
-interface MetadataFileStepInput {
-  fileName: string;
-  documentId: string;
-  folderId: string;
-  imageNames: string[];
-  ocrText: string;
-  confidence: ConfidenceBucket;
-  baseMetadata: MetadataExtraction;
-}
-
-interface MetadataFileStepResult {
-  metadata: MetadataExtraction;
-  errors: TranscriptionError[];
-}
-
-// Step 3: extract structured metadata (the only AI call here). Skipped when
-// there is no transcription text to analyze.
-async function metadataFileStep(
-  input: MetadataFileStepInput,
-): Promise<MetadataFileStepResult> {
-  "use step";
-
-  const { fileName, documentId, folderId, imageNames, ocrText, confidence } =
-    input;
-
-  await emitEvent({
-    type: "file-stage",
-    fileName,
-    stage: "indexing",
-    at: new Date().toISOString(),
-  });
-
-  const errors: TranscriptionError[] = [];
-  let metadata = input.baseMetadata;
-
-  try {
-    const indexed = await extractMetadata({
-      documentId,
-      folderId,
-      imageNames,
-      ocrText,
-      confidence,
-    });
-    metadata = indexed.metadata;
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    errors.push({ fileName, stage: "metadata", message });
-    if (isTransientError(error)) {
-      throw new RetryableError(
-        `Metadata extraction failed for ${fileName}: ${message}`,
-      );
-    }
-  }
+  await repository.saveProcessedDocument(documentPackage, transcription, metadata);
 
   await emitEvent({
     type: "file-completed",
-    fileName,
-    documentId,
+    fileName: blob.name,
+    documentId: documentPackage.documentId,
     at: new Date().toISOString(),
   });
-  console.info("[batch-ingest] file:done", { fileName, documentId });
+  console.info("[batch-ingest] file:done", {
+    fileName: blob.name,
+    documentId: documentPackage.documentId,
+  });
 
-  return { metadata, errors };
+  return { documentPackage, transcription, metadata };
 }
 
 async function emitFileFailedStep(input: {
@@ -474,13 +395,6 @@ async function finalizeBatchStep(input: {
       result: aggregated,
     });
   }
-}
-
-async function cleanupBlobsStep(urls: string[]): Promise<void> {
-  "use step";
-  if (urls.length === 0) return;
-  console.info("[batch-ingest] cleanup", { urls: urls.length });
-  await Promise.allSettled(urls.map((url) => del(url)));
 }
 
 // ---------- helpers ----------

@@ -1,7 +1,6 @@
 import { generateText, Output } from "ai";
 import { z } from "zod";
 import { getActivePrompt, type TranscriptionPromptTask } from "./prompts";
-import type { ConfidenceBucket, MetadataExtraction } from "./types";
 
 // Multimodal OCR / HTR and metadata extraction via the Vercel AI Gateway.
 // A plain "provider/model" string auto-routes through the gateway when
@@ -17,10 +16,10 @@ const SUPPORTED_IMAGE_MIME_TYPES = new Set([
 ]);
 
 const SUPPORTED_PDF_MIME_TYPE = "application/pdf";
-// Vision-capable AI Gateway model slugs. Both can be overridden through the
-// EDISON_OCR_MODEL and EDISON_METADATA_MODEL environment variables.
+// Vision-capable AI Gateway model slug. Overridable through the
+// EDISON_OCR_MODEL environment variable. A single call now produces both the
+// transcription and the structured metadata.
 const DEFAULT_OCR_MODEL = "google/gemini-2.5-flash";
-const DEFAULT_METADATA_MODEL = "google/gemini-2.5-flash-lite";
 // Must stay below the serverless function ceiling (60s on the Hobby plan) so a
 // slow model call aborts cleanly and is caught as a retryable error instead of
 // the platform killing the whole step mid-request. Override with
@@ -43,12 +42,6 @@ export function isTranscribableMediaType(mimeType: string): boolean {
 
 export function getDefaultOcrModel(env: NodeJS.ProcessEnv = process.env): string {
   return env.EDISON_OCR_MODEL ?? DEFAULT_OCR_MODEL;
-}
-
-export function getDefaultMetadataModel(
-  env: NodeJS.ProcessEnv = process.env,
-): string {
-  return env.EDISON_METADATA_MODEL ?? DEFAULT_METADATA_MODEL;
 }
 
 function getRequestTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
@@ -87,6 +80,18 @@ export interface TranscribeDocumentInput {
   promptTask?: TranscriptionPromptTask;
 }
 
+// Structured metadata fields extracted alongside the transcription in the same
+// model call. The caller assembles these into a full MetadataExtraction by
+// adding folderId / documentId / imageNames / confidence.
+export interface TranscribedMetadata {
+  documentType: string;
+  date: string;
+  authors: string[];
+  recipients: string[];
+  mentionedNames: string[];
+  subjects: string[];
+}
+
 export interface TranscribeDocumentResult {
   ocrText: string;
   uncertainReadings: string[];
@@ -94,7 +99,55 @@ export interface TranscribeDocumentResult {
   promptVersion: string;
   inputTokens?: number;
   outputTokens?: number;
+  // Best-effort structured metadata produced in the same call. Undefined when
+  // the model returned no usable transcription text.
+  metadata?: TranscribedMetadata;
 }
+
+// Combined transcription + indexing schema. Folding both into a single model
+// call halves request volume (one call per file instead of two), which keeps
+// the free-tier rate limit far out of reach, and metadata can never fail a
+// file on its own because it rides along with the transcription response.
+const combinedSchema = z.object({
+  transcription: z
+    .string()
+    .describe(
+      "The full diplomatic transcription following every formatting rule in the instructions above. Use the document's own paragraphing, punctuation, and underlining; bracket low-confidence readings with a trailing question mark; place annotations and marginal notes at the end.",
+    ),
+  documentType: z
+    .string()
+    .describe(
+      'Document type such as "correspondence", "telegram", "notebook page", "ledger", "memorandum", or "Unknown" if unclear.',
+    ),
+  date: z
+    .string()
+    .describe(
+      'Document date as YYYY-MM-DD when fully known, YYYY-MM or YYYY when partial, or "Unknown".',
+    ),
+  authors: z
+    .array(z.string())
+    .describe(
+      'People who wrote or signed the document. Use "Last, First" form. Empty array if none.',
+    ),
+  recipients: z
+    .array(z.string())
+    .describe(
+      'People the document is addressed to. Use "Last, First" form. Empty array if none.',
+    ),
+  mentionedNames: z
+    .array(z.string())
+    .describe(
+      "People, organizations, or places named in the body that are not authors or recipients. Empty array if none.",
+    ),
+  subjects: z
+    .array(z.string())
+    .describe(
+      "Short-form subject tags drawn from the text. 1-6 entries. Empty array if none.",
+    ),
+});
+
+const METADATA_INSTRUCTION =
+  "After transcribing, also index the document: identify the document type, the date (Year-Month-Day when known), the author(s) and recipient(s) using last-name-first form, other names mentioned, and a few short-form subject tags. Return everything in the structured fields provided.";
 
 export async function transcribeDocument(
   input: TranscribeDocumentInput,
@@ -126,15 +179,22 @@ export async function transcribeDocument(
     const result = await generateText({
       model,
       abortSignal: signal,
+      output: Output.object({ schema: combinedSchema }),
       messages: [
         {
           role: "user",
-          content: [{ type: "text", text: activePrompt.prompt }, mediaPart],
+          content: [
+            {
+              type: "text",
+              text: `${activePrompt.prompt}\n\n${METADATA_INSTRUCTION}`,
+            },
+            mediaPart,
+          ],
         },
       ],
     });
 
-    const ocrText = result.text.trim();
+    const ocrText = (result.output.transcription ?? "").trim();
     const uncertainReadings = ocrText.match(/\[[^\]]+\?\]/g) ?? [];
 
     return {
@@ -144,131 +204,19 @@ export async function transcribeDocument(
       promptVersion: activePrompt.version,
       inputTokens: result.usage?.inputTokens,
       outputTokens: result.usage?.outputTokens,
+      metadata:
+        ocrText.length > 0
+          ? {
+              documentType: result.output.documentType || "Unknown",
+              date: result.output.date || "Unknown",
+              authors: result.output.authors ?? [],
+              recipients: result.output.recipients ?? [],
+              mentionedNames: result.output.mentionedNames ?? [],
+              subjects: result.output.subjects ?? [],
+            }
+          : undefined,
     };
   } finally {
     cleanup();
   }
-}
-
-const metadataSchema = z.object({
-  documentType: z
-    .string()
-    .describe(
-      'Document type such as "correspondence", "telegram", "notebook page", "ledger", "memorandum", or "Unknown" if unclear.',
-    ),
-  date: z
-    .string()
-    .describe(
-      'Document date as YYYY-MM-DD when fully known, YYYY-MM or YYYY when partial, or "Unknown".',
-    ),
-  authors: z
-    .array(z.string())
-    .describe(
-      'People who wrote or signed the document. Use "Last, First" form. Empty array if none.',
-    ),
-  recipients: z
-    .array(z.string())
-    .describe(
-      'People the document is addressed to. Use "Last, First" form. Empty array if none.',
-    ),
-  mentionedNames: z
-    .array(z.string())
-    .describe(
-      "People, organizations, or places named in the body. Empty array if none.",
-    ),
-  subjects: z
-    .array(z.string())
-    .describe(
-      "Short-form subject tags drawn from the text. 1-6 entries. Empty array if none.",
-    ),
-});
-
-export interface ExtractMetadataInput {
-  documentId: string;
-  folderId: string;
-  imageNames: string[];
-  ocrText: string;
-  confidence: ConfidenceBucket;
-  model?: string;
-  signal?: AbortSignal;
-}
-
-export interface ExtractMetadataResult {
-  metadata: MetadataExtraction;
-  model: string;
-  promptVersion: string;
-  inputTokens?: number;
-  outputTokens?: number;
-}
-
-export async function extractMetadata(
-  input: ExtractMetadataInput,
-): Promise<ExtractMetadataResult> {
-  const model = input.model ?? getDefaultMetadataModel();
-  const activePrompt = getActivePrompt("metadata-extraction");
-
-  if (input.ocrText.trim().length === 0) {
-    return {
-      metadata: emptyMetadata(input),
-      model,
-      promptVersion: activePrompt.version,
-    };
-  }
-
-  const { signal, cleanup } = combineSignals(input.signal, getRequestTimeoutMs());
-  try {
-    const result = await generateText({
-      model,
-      abortSignal: signal,
-      output: Output.object({ schema: metadataSchema }),
-      messages: [
-        {
-          role: "user",
-          content: [
-            { type: "text", text: activePrompt.prompt },
-            {
-              type: "text",
-              text: `Transcription to analyze:\n\n${input.ocrText}`,
-            },
-          ],
-        },
-      ],
-    });
-
-    return {
-      metadata: {
-        folderId: input.folderId,
-        documentId: input.documentId,
-        documentType: result.output.documentType || "Unknown",
-        date: result.output.date || "Unknown",
-        authors: result.output.authors ?? [],
-        recipients: result.output.recipients ?? [],
-        mentionedNames: result.output.mentionedNames ?? [],
-        subjects: result.output.subjects ?? [],
-        imageNames: input.imageNames,
-        confidence: input.confidence,
-      },
-      model,
-      promptVersion: activePrompt.version,
-      inputTokens: result.usage?.inputTokens,
-      outputTokens: result.usage?.outputTokens,
-    };
-  } finally {
-    cleanup();
-  }
-}
-
-function emptyMetadata(input: ExtractMetadataInput): MetadataExtraction {
-  return {
-    folderId: input.folderId,
-    documentId: input.documentId,
-    documentType: "Unknown",
-    date: "Unknown",
-    authors: [],
-    recipients: [],
-    mentionedNames: [],
-    subjects: [],
-    imageNames: input.imageNames,
-    confidence: input.confidence,
-  };
 }

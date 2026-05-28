@@ -19,8 +19,9 @@ import type {
 
 interface ReviewerWorkbenchProps {
   documents: DocumentPackage[];
-  transcription: TranscriptionRun;
-  metadata: MetadataExtraction;
+  transcriptions: Record<string, TranscriptionRun>;
+  metadata: Record<string, MetadataExtraction>;
+  initialDocumentId?: string;
 }
 
 const confidenceDot: Record<ConfidenceBucket, string> = {
@@ -30,12 +31,44 @@ const confidenceDot: Record<ConfidenceBucket, string> = {
   blocked: "bg-slate-400",
 };
 
+function emptyTranscription(documentId: string): TranscriptionRun {
+  return {
+    id: `${documentId}-pending-transcription`,
+    documentId,
+    model: "not-run",
+    promptVersion: "not-run",
+    ocrText: "",
+    diplomaticText: "",
+    uncertainReadings: [],
+  };
+}
+
+function emptyMetadata(document: DocumentPackage): MetadataExtraction {
+  return {
+    folderId: document.folderId,
+    documentId: document.documentId,
+    documentType: "Unknown",
+    date: "Unknown",
+    authors: [],
+    recipients: [],
+    mentionedNames: [],
+    subjects: [],
+    imageNames: document.pages.map((page) => page.imageFilename),
+    confidence: document.confidence,
+  };
+}
+
 export function ReviewerWorkbench({
   documents,
-  transcription,
+  transcriptions,
   metadata,
+  initialDocumentId,
 }: ReviewerWorkbenchProps) {
-  const [activeIndex, setActiveIndex] = useState(0);
+  const initialIndex = Math.max(
+    0,
+    documents.findIndex((doc) => doc.documentId === initialDocumentId),
+  );
+  const [activeIndex, setActiveIndex] = useState(initialIndex);
 
   const activeDocument = documents[activeIndex] ?? documents[0];
 
@@ -53,6 +86,11 @@ export function ReviewerWorkbench({
   }
 
   const queuePosition = `${activeIndex + 1} of ${documents.length}`;
+  const transcription =
+    transcriptions[activeDocument.documentId] ??
+    emptyTranscription(activeDocument.documentId);
+  const activeMetadata =
+    metadata[activeDocument.documentId] ?? emptyMetadata(activeDocument);
 
   function goToDocument(index: number) {
     const next = Math.max(0, Math.min(index, documents.length - 1));
@@ -109,14 +147,20 @@ export function ReviewerWorkbench({
       </div>
 
       <div className="border-b border-border bg-muted/40 p-3">
-        <DocumentViewer document={activeDocument} transcription={transcription} />
+        <div className="h-[72vh] min-h-[560px]">
+          <DocumentViewer
+            document={activeDocument}
+            transcription={transcription}
+            className="h-full"
+          />
+        </div>
       </div>
 
       <div className="grid gap-0 md:grid-cols-2 md:divide-x md:divide-border">
         <div className="border-b border-border md:border-b-0">
           <PanelHeading>Metadata checks</PanelHeading>
           <div className="px-5 py-4">
-            <MetadataRows metadata={metadata} />
+            <MetadataRows metadata={activeMetadata} />
           </div>
         </div>
 

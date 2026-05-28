@@ -12,14 +12,22 @@ export interface DashboardSummary {
   readyToExport: number;
 }
 
+export interface DocumentRecords {
+  documents: DocumentPackage[];
+  transcriptions: Record<string, TranscriptionRun>;
+  metadata: Record<string, MetadataExtraction>;
+}
+
 export interface ReviewCase {
   documents: DocumentPackage[];
-  transcription: TranscriptionRun;
-  metadata: MetadataExtraction;
+  selectedDocumentId: string;
+  transcriptions: Record<string, TranscriptionRun>;
+  metadata: Record<string, MetadataExtraction>;
 }
 
 export interface EdisonRepository {
   listDocuments(): Promise<DocumentPackage[]>;
+  listDocumentRecords(): Promise<DocumentRecords>;
   saveDocuments(documents: DocumentPackage[]): Promise<void>;
   saveProcessedDocuments(
     documents: DocumentPackage[],
@@ -31,6 +39,10 @@ export interface EdisonRepository {
     transcription: TranscriptionRun,
     metadata: MetadataExtraction,
   ): Promise<void>;
+  updateTranscriptionText(
+    documentId: string,
+    diplomaticText: string,
+  ): Promise<DocumentPackage | null>;
   getReviewCase(documentId?: string): Promise<ReviewCase | null>;
   listApprovedExportRows(): Promise<
     Array<{

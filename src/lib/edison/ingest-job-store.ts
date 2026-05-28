@@ -5,7 +5,6 @@ export type FileStage =
   | "uploaded"
   | "fetching"
   | "transcribing"
-  | "indexing"
   | "saving"
   | "done"
   | "failed";

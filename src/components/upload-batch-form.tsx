@@ -1,12 +1,18 @@
 "use client";
 
 import { upload } from "@vercel/blob/client";
-import { Download, Loader2, Upload as UploadIcon } from "lucide-react";
-import { useId, useMemo, useRef, useState } from "react";
+import {
+  ArrowRight,
+  CheckCircle2,
+  Download,
+  Loader2,
+  Upload as UploadIcon,
+} from "lucide-react";
+import { useRouter } from "next/navigation";
+import { useEffect, useId, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { FilePipelineTracker } from "@/components/upload/file-pipeline-tracker";
-import { SourceTranscriptionRow } from "@/components/upload/source-transcription-row";
 import type { IngestJobSnapshot } from "@/lib/edison/ingest-job-store";
 import type { ManualIngestResult } from "@/lib/edison/service";
 import {
@@ -47,12 +53,18 @@ interface UploadBatchFormProps {
 
 type PromptTask = "diplomatic-transcription" | "project-notebook";
 
+// Grace period before automatically moving the reviewer to the review tab,
+// leaving a moment to grab the batch ZIP if they want it.
+const REVIEW_REDIRECT_DELAY_MS = 1800;
+
 export function UploadBatchForm({ blobReady }: UploadBatchFormProps) {
+  const router = useRouter();
   const filesInputId = useId();
   const folderInputId = useId();
   const promptInputId = useId();
   const formRef = useRef<HTMLFormElement | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const redirectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [files, setFiles] = useState<File[]>([]);
   const [promptTask, setPromptTask] = useState<PromptTask>(
     "diplomatic-transcription",
@@ -66,19 +78,39 @@ export function UploadBatchForm({ blobReady }: UploadBatchFormProps) {
   const [ingestJob, setIngestJob] = useState<IngestJobSnapshot | null>(null);
   const [downloading, setDownloading] = useState(false);
 
-  const filesByName = useMemo(() => {
-    const map = new Map<string, File>();
-    for (const file of files) {
-      map.set(file.name, file);
-    }
-    return map;
-  }, [files]);
-
   const busy =
     status === "uploading" ||
     status === "finalizing" ||
     status === "processing";
   const canDownload = Boolean(result && result.packages.length > 0);
+
+  function cancelAutoRedirect() {
+    if (redirectTimerRef.current) {
+      clearTimeout(redirectTimerRef.current);
+      redirectTimerRef.current = null;
+    }
+  }
+
+  useEffect(() => cancelAutoRedirect, []);
+
+  function reviewTarget(ingestResult: ManualIngestResult): string {
+    const firstReviewable = ingestResult.packages.find(
+      (pkg) => pkg.status === "needs_review",
+    );
+    const target = firstReviewable ?? ingestResult.packages[0];
+    return target
+      ? `/review?doc=${encodeURIComponent(target.documentId)}`
+      : "/review";
+  }
+
+  function goToReview() {
+    cancelAutoRedirect();
+    if (result) {
+      router.push(reviewTarget(result));
+    } else {
+      router.push("/review");
+    }
+  }
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -151,10 +183,16 @@ export function UploadBatchForm({ blobReady }: UploadBatchFormProps) {
         {
           description:
             warnings > 0
-              ? `${warnings} warning${warnings === 1 ? "" : "s"} — see results below.`
-              : "Transcription and metadata extraction complete.",
+              ? `${warnings} warning${warnings === 1 ? "" : "s"} — opening review.`
+              : "Transcription complete — opening review.",
         },
       );
+      const completedResult = finalJob.result;
+      cancelAutoRedirect();
+      redirectTimerRef.current = setTimeout(() => {
+        redirectTimerRef.current = null;
+        router.push(reviewTarget(completedResult));
+      }, REVIEW_REDIRECT_DELAY_MS);
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Unknown network error.";
@@ -171,6 +209,7 @@ export function UploadBatchForm({ blobReady }: UploadBatchFormProps) {
   }
 
   function handleReset() {
+    cancelAutoRedirect();
     abortControllerRef.current?.abort();
     setFiles([]);
     setResult(null);
@@ -187,6 +226,7 @@ export function UploadBatchForm({ blobReady }: UploadBatchFormProps) {
 
   async function handleDownload() {
     if (!result) return;
+    cancelAutoRedirect();
     setDownloading(true);
     try {
       const response = await fetch("/api/export/batch", {
@@ -400,36 +440,32 @@ export function UploadBatchForm({ blobReady }: UploadBatchFormProps) {
         ) : null}
       </form>
 
-      {result && result.packages.length > 0 ? (
-        <section
-          aria-label="Batch results"
-          className="border border-border bg-card"
-        >
-          <header className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-5 py-3">
-            <h2 className="text-[15px] font-semibold text-foreground">
-              Source &amp; transcription
-            </h2>
-            <p className="text-[12px] text-muted-foreground">
-              {result.packages.length} package
-              {result.packages.length === 1 ? "" : "s"} ·{" "}
-              {result.transcriptionErrors.length} warning
-              {result.transcriptionErrors.length === 1 ? "" : "s"}
-            </p>
-          </header>
-          {result.packages.map((pkg, index) => (
-            <SourceTranscriptionRow
-              key={pkg.documentId}
-              documentPackage={pkg}
-              transcription={result.transcriptions[index]}
-              metadata={result.metadata[index]}
-              sourceFile={filesByName.get(pkg.sourceFile.name)}
-              errors={result.transcriptionErrors.filter(
-                (entry) => entry.fileName === pkg.sourceFile.name,
-              )}
+      {status === "success" && result && result.packages.length > 0 ? (
+        <div className="flex flex-wrap items-center justify-between gap-3 border border-emerald-300 bg-emerald-50 px-4 py-3">
+          <div className="flex min-w-0 items-start gap-2.5">
+            <CheckCircle2
+              className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600"
+              strokeWidth={2}
+              aria-hidden="true"
             />
-          ))}
-        </section>
+            <div className="min-w-0 text-sm text-emerald-900">
+              <p className="font-semibold">
+                {result.packages.length} file
+                {result.packages.length === 1 ? "" : "s"} transcribed
+              </p>
+              <p className="text-[13px] text-emerald-800">
+                Opening review to verify side-by-side. Grab the batch ZIP first
+                if you need it.
+              </p>
+            </div>
+          </div>
+          <Button type="button" onClick={goToReview}>
+            Review &amp; verify
+            <ArrowRight aria-hidden="true" />
+          </Button>
+        </div>
       ) : null}
+
     </div>
   );
 }

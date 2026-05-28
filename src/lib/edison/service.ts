@@ -1,13 +1,14 @@
 import { AppError } from "./app-error";
+import { buildAuditTrail, type AuditEvent } from "./audit";
 import { createDocumentPackage } from "./extraction";
 import { buildOmekaCsv, buildOmekaCsvRow } from "./omeka-export";
 import { getActivePrompt } from "./prompts";
 import type { EdisonRepository } from "./repositories";
 import { summarizeDocuments } from "./repositories";
 import {
-  extractMetadata,
   isTranscribableMediaType,
   transcribeDocument,
+  type TranscribedMetadata,
 } from "./transcribe";
 import type {
   ConfidenceBucket,
@@ -70,6 +71,9 @@ export interface ProcessSourceFileInput {
   existingIds: Set<string>;
   rawOcrText?: string;
   model?: string;
+  // Durable URL of the retained source file. Attached to image pages so the
+  // viewer can render the original alongside the transcription.
+  sourceUrl?: string;
 }
 
 export interface ProcessSourceFileResult {
@@ -146,13 +150,29 @@ function extractUncertainReadings(text: string): string[] {
 export async function processSourceFile(
   input: ProcessSourceFileInput,
 ): Promise<ProcessSourceFileResult> {
-  const documentPackage = await createDocumentPackage({
+  const built = await createDocumentPackage({
     sourceFile: input.sourceFile,
     bytes: input.bytes,
     folderId: input.folderId,
     batchIndex: input.batchIndex,
     existingIds: input.existingIds,
   });
+
+  // Attach the retained source URL to image pages so the viewer renders the
+  // original. Single-image uploads have exactly one page; multi-page PDFs are
+  // not rasterized per page, so they keep the facsimile placeholder.
+  const isImageSource = input.sourceFile.mimeType.toLowerCase().startsWith("image/");
+  const documentPackage: DocumentPackage =
+    input.sourceUrl && isImageSource
+      ? {
+          ...built,
+          pages: built.pages.map((page) =>
+            page.pageIndex === 0
+              ? { ...page, originalUrl: input.sourceUrl }
+              : page,
+          ),
+        }
+      : built;
 
   const blocked = documentPackage.status === "blocked";
   const rawOcrText = input.rawOcrText ?? "";
@@ -221,6 +241,22 @@ export class EdisonAutomationService {
     return this.repository.getReviewCase(documentId);
   }
 
+  async getAuditTrail(): Promise<AuditEvent[]> {
+    const records = await this.repository.listDocumentRecords();
+    return buildAuditTrail(records);
+  }
+
+  async saveTranscriptionEdit(documentId: string, diplomaticText: string) {
+    const updated = await this.repository.updateTranscriptionText(
+      documentId,
+      diplomaticText,
+    );
+    if (!updated) {
+      throw new AppError("NOT_FOUND", "Document was not found.", 404);
+    }
+    return updated;
+  }
+
   async ingestManualFiles(
     input: ManualIngestInput,
   ): Promise<ManualIngestResult> {
@@ -255,6 +291,7 @@ export class EdisonAutomationService {
       let transcribeModel: string | undefined;
       let transcribeInputTokens: number | undefined;
       let transcribeOutputTokens: number | undefined;
+      let foldedMetadata: TranscribedMetadata | undefined;
 
       if (aiGatewayConfigured && isTranscribableMediaType(sourceFile.mimeType)) {
         try {
@@ -272,6 +309,7 @@ export class EdisonAutomationService {
           transcribeModel = transcribed.model;
           transcribeInputTokens = transcribed.inputTokens;
           transcribeOutputTokens = transcribed.outputTokens;
+          foldedMetadata = transcribed.metadata;
         } catch (error) {
           transcriptionErrors.push({
             fileName: sourceFile.name,
@@ -298,31 +336,19 @@ export class EdisonAutomationService {
       });
       existingIds.add(processed.documentPackage.documentId);
 
-      let documentMetadata: MetadataExtraction = processed.metadata;
-      if (aiGatewayConfigured && rawOcrText && rawOcrText.trim().length > 0) {
-        try {
-          input.onProgress?.({
-            fileName: sourceFile.name,
-            stage: "metadata",
-            processedFiles: index,
-            totalFiles,
-          });
-          const indexed = await extractMetadata({
-            documentId: processed.documentPackage.documentId,
-            folderId: processed.documentPackage.folderId,
-            imageNames: processed.metadata.imageNames,
-            ocrText: rawOcrText,
-            confidence: processed.confidence,
-          });
-          documentMetadata = indexed.metadata;
-        } catch (error) {
-          transcriptionErrors.push({
-            fileName: sourceFile.name,
-            stage: "metadata",
-            message: error instanceof Error ? error.message : String(error),
-          });
-        }
-      }
+      // Metadata is produced in the same call as the transcription, so it
+      // never fails the file on its own. Fall back to base metadata otherwise.
+      const documentMetadata: MetadataExtraction = foldedMetadata
+        ? {
+            ...processed.metadata,
+            documentType: foldedMetadata.documentType || "Unknown",
+            date: foldedMetadata.date || "Unknown",
+            authors: foldedMetadata.authors,
+            recipients: foldedMetadata.recipients,
+            mentionedNames: foldedMetadata.mentionedNames,
+            subjects: foldedMetadata.subjects,
+          }
+        : processed.metadata;
 
       const transcription: TranscriptionRun = {
         ...processed.transcription,

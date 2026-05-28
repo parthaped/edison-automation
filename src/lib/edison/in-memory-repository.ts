@@ -1,5 +1,9 @@
 import { sampleDocuments, sampleMetadata, sampleTranscription } from "./sample-data";
-import type { EdisonRepository, ReviewCase } from "./repositories";
+import type {
+  DocumentRecords,
+  EdisonRepository,
+  ReviewCase,
+} from "./repositories";
 import type {
   DocumentPackage,
   MetadataExtraction,
@@ -25,6 +29,20 @@ export class InMemoryEdisonRepository implements EdisonRepository {
     return [...this.documents.values()].sort((a, b) =>
       a.updatedAt < b.updatedAt ? 1 : -1,
     );
+  }
+
+  async listDocumentRecords(): Promise<DocumentRecords> {
+    const documents = await this.listDocuments();
+    const transcriptions: Record<string, TranscriptionRun> = {};
+    const metadata: Record<string, MetadataExtraction> = {};
+    for (const document of documents) {
+      transcriptions[document.documentId] =
+        this.transcriptions.get(document.documentId) ??
+        emptyTranscription(document.documentId);
+      metadata[document.documentId] =
+        this.metadata.get(document.documentId) ?? emptyMetadata(document);
+    }
+    return { documents, transcriptions, metadata };
   }
 
   async saveDocuments(documents: DocumentPackage[]): Promise<void> {
@@ -65,23 +83,56 @@ export class InMemoryEdisonRepository implements EdisonRepository {
     this.metadata.set(metadata.documentId, metadata);
   }
 
-  async getReviewCase(documentId?: string): Promise<ReviewCase | null> {
-    const documents = await this.listDocuments();
-    if (documents.length === 0) return null;
+  async updateTranscriptionText(
+    documentId: string,
+    diplomaticText: string,
+  ): Promise<DocumentPackage | null> {
+    const document = this.documents.get(documentId);
+    if (!document) return null;
 
-    const reviewable = documents.filter((document) =>
+    const existing =
+      this.transcriptions.get(documentId) ?? emptyTranscription(documentId);
+    this.transcriptions.set(documentId, {
+      ...existing,
+      diplomaticText,
+      uncertainReadings: diplomaticText.match(/\[[^\]]+\?\]/g) ?? [],
+    });
+
+    const updated: DocumentPackage = {
+      ...document,
+      updatedAt: new Date().toISOString(),
+    };
+    this.documents.set(documentId, updated);
+    return updated;
+  }
+
+  async getReviewCase(documentId?: string): Promise<ReviewCase | null> {
+    const allDocuments = await this.listDocuments();
+    if (allDocuments.length === 0) return null;
+
+    const reviewable = allDocuments.filter((document) =>
       ["needs_review", "blocked"].includes(document.status),
     );
+    const documents = reviewable.length > 0 ? reviewable : allDocuments;
     const selected =
       documents.find((document) => document.documentId === documentId) ??
-      reviewable[0] ??
       documents[0];
 
+    const transcriptions: Record<string, TranscriptionRun> = {};
+    const metadata: Record<string, MetadataExtraction> = {};
+    for (const document of documents) {
+      transcriptions[document.documentId] =
+        this.transcriptions.get(document.documentId) ??
+        emptyTranscription(document.documentId);
+      metadata[document.documentId] =
+        this.metadata.get(document.documentId) ?? emptyMetadata(document);
+    }
+
     return {
-      documents: reviewable.length > 0 ? reviewable : documents,
-      transcription:
-        this.transcriptions.get(selected.documentId) ?? emptyTranscription(selected.documentId),
-      metadata: this.metadata.get(selected.documentId) ?? emptyMetadata(selected),
+      documents,
+      selectedDocumentId: selected.documentId,
+      transcriptions,
+      metadata,
     };
   }
 

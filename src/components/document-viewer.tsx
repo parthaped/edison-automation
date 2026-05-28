@@ -77,6 +77,8 @@ export function DocumentViewer({
   const [rightOpen, setRightOpen] = useState(true);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [editedText, setEditedText] = useState(transcription.diplomaticText);
+  const [savedText, setSavedText] = useState(transcription.diplomaticText);
+  const [saving, setSaving] = useState(false);
   const [lastTranscriptionId, setLastTranscriptionId] = useState(transcription.id);
   const [lastActivePage, setLastActivePage] = useState(activePage);
 
@@ -90,6 +92,7 @@ export function DocumentViewer({
   if (lastTranscriptionId !== transcription.id) {
     setLastTranscriptionId(transcription.id);
     setEditedText(transcription.diplomaticText);
+    setSavedText(transcription.diplomaticText);
   }
 
   if (lastActivePage !== activePage) {
@@ -225,6 +228,37 @@ export function DocumentViewer({
     onTranscriptionChange?.(next);
   }
 
+  const dirty = editedText !== savedText;
+
+  async function handleSave() {
+    if (saving) return;
+    setSaving(true);
+    try {
+      const response = await fetch(
+        `/api/documents/${encodeURIComponent(document.documentId)}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ diplomaticText: editedText }),
+        },
+      );
+      if (!response.ok) {
+        const data = (await response.json().catch(() => null)) as
+          | { error?: string }
+          | null;
+        throw new Error(data?.error ?? `Save failed (${response.status}).`);
+      }
+      setSavedText(editedText);
+      toast.success("Transcription saved.");
+    } catch (error) {
+      toast.error("Could not save transcription", {
+        description: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      setSaving(false);
+    }
+  }
+
   function selectUncertain(token: string) {
     const ta = textareaRef.current;
     if (!ta) return;
@@ -287,7 +321,7 @@ export function DocumentViewer({
       ref={containerRef}
       aria-label="Source and transcription viewer"
       className={cn(
-        "edison-viewer relative overflow-hidden border border-border bg-card min-h-[680px]",
+        "edison-viewer relative flex min-h-[560px] flex-col overflow-hidden border border-border bg-card",
         className,
       )}
     >
@@ -319,7 +353,7 @@ export function DocumentViewer({
 
       <div
         className={cn(
-          "grid min-h-[560px] gap-px bg-border",
+          "grid min-h-0 flex-1 gap-px overflow-y-auto bg-border lg:overflow-hidden",
           gridColsClass(leftOpen, rightOpen),
         )}
       >
@@ -367,6 +401,9 @@ export function DocumentViewer({
             onChange={handleTextareaChange}
             onSelectUncertain={selectUncertain}
             onClose={() => setRightOpen(false)}
+            onSave={handleSave}
+            saving={saving}
+            dirty={dirty}
           />
         ) : null}
       </div>
@@ -456,7 +493,7 @@ function Toolbar({
     <div
       role="toolbar"
       aria-label="Viewer controls"
-      className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 bg-slate-900 px-3 py-2 text-slate-200"
+      className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-slate-800 bg-slate-900 px-3 py-2 text-slate-200"
     >
       <div className="flex items-center gap-2">
         <ToolbarIconButton
@@ -681,7 +718,7 @@ function ContentsRail({
   return (
     <aside
       aria-label="Document contents"
-      className="flex min-h-full flex-col bg-muted/60"
+      className="flex h-full min-h-0 flex-col bg-muted/60"
     >
       <div className="flex items-center justify-between border-b border-border bg-card px-3 py-2">
         <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
@@ -894,7 +931,7 @@ function SourceStage({
       onDoubleClick={onDoubleClick}
       style={stageStyle}
       className={cn(
-        "relative flex min-h-[520px] items-center justify-center overflow-hidden bg-slate-950 p-6 sm:p-10",
+        "relative flex h-full min-h-[280px] min-w-0 items-center justify-center overflow-hidden bg-slate-950 p-6 sm:p-10",
         cursorClass,
       )}
     >
@@ -910,12 +947,16 @@ function SourceStage({
           initial={{ opacity: 0, y: 6 }}
           animate={{ opacity: 1, y: 0 }}
           transition={motionSpring}
-          className="flex items-center justify-center gap-6"
+          className="flex h-full max-h-full w-full items-center justify-center gap-6"
           style={{ transform, transformOrigin: "center center" }}
         >
-          <PageRender page={currentPage} />
+          <div className="flex h-full min-w-0 flex-1 items-center justify-center">
+            <PageRender page={currentPage} />
+          </div>
           {viewLayout === "two-page" && adjacentPage ? (
-            <PageRender page={adjacentPage} />
+            <div className="flex h-full min-w-0 flex-1 items-center justify-center">
+              <PageRender page={adjacentPage} />
+            </div>
           ) : null}
         </motion.div>
       ) : (
@@ -949,7 +990,7 @@ function GridLayout({
   onSelect: (index: number) => void;
 }) {
   return (
-    <div className="grid w-full max-w-3xl grid-cols-2 gap-4 sm:grid-cols-3">
+    <div className="grid max-h-full w-full max-w-3xl grid-cols-2 gap-4 overflow-y-auto py-1 sm:grid-cols-3">
       {pages.map((page, index) => (
         <button
           key={page.id}
@@ -993,7 +1034,7 @@ function PageRender({ page }: { page: PageImage }) {
         src={page.originalUrl}
         alt={`Page ${page.sourcePage}`}
         draggable={false}
-        className="max-h-[70vh] w-auto max-w-full select-none rounded-md shadow-[0_20px_60px_-30px_rgba(0,0,0,0.6)]"
+        className="max-h-full w-auto max-w-full select-none rounded-md object-contain shadow-[0_20px_60px_-30px_rgba(0,0,0,0.6)]"
       />
     );
   }
@@ -1152,6 +1193,9 @@ interface TranscriptionPaneProps {
   onChange: (event: React.ChangeEvent<HTMLTextAreaElement>) => void;
   onSelectUncertain: (token: string) => void;
   onClose: () => void;
+  onSave: () => void;
+  saving: boolean;
+  dirty: boolean;
 }
 
 function TranscriptionPane({
@@ -1163,17 +1207,20 @@ function TranscriptionPane({
   onChange,
   onSelectUncertain,
   onClose,
+  onSave,
+  saving,
+  dirty,
 }: TranscriptionPaneProps) {
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if ((event.metaKey || event.ctrlKey) && event.key === "s") {
       event.preventDefault();
-      toast.info("Use Save review action below to commit changes.");
+      onSave();
     }
   }
   return (
     <aside
       aria-label="Transcription editor"
-      className="flex min-h-full flex-col bg-card"
+      className="flex h-full min-h-0 flex-col bg-card"
     >
       <header className="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
         <div className="min-w-0">
@@ -1232,17 +1279,28 @@ function TranscriptionPane({
           onChange={onChange}
           onKeyDown={handleKeyDown}
           spellCheck={false}
-          className="block h-full min-h-[420px] w-full resize-none rounded-sm border border-border bg-card px-3 py-3 font-mono text-[13px] leading-6 text-foreground transition-shadow placeholder:text-muted-foreground/70 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
+          className="block h-full min-h-[160px] w-full resize-none rounded-sm border border-border bg-card px-3 py-3 font-mono text-[13px] leading-6 text-foreground transition-shadow placeholder:text-muted-foreground/70 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
         />
       </div>
 
       <footer className="flex items-center justify-between gap-3 border-t border-border px-4 py-2 text-[11px] text-muted-foreground">
         <span className="font-mono tabular-nums">
           {characterCount} ch
+          {dirty ? <span className="ml-1 text-amber-600">· unsaved</span> : null}
         </span>
-        <span className="truncate font-mono">
-          {transcription.model} · v{transcription.promptVersion}
-        </span>
+        <div className="flex items-center gap-2">
+          <span className="hidden truncate font-mono sm:inline">
+            {transcription.model} · v{transcription.promptVersion}
+          </span>
+          <button
+            type="button"
+            onClick={onSave}
+            disabled={saving || !dirty}
+            className="inline-flex h-7 items-center justify-center rounded-md bg-primary px-3 text-[12px] font-semibold text-primary-foreground transition-colors hover:bg-primary/85 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {saving ? "Saving…" : "Save"}
+          </button>
+        </div>
       </footer>
     </aside>
   );
@@ -1272,7 +1330,7 @@ function BottomBar({
   pageIndicator,
 }: BottomBarProps) {
   return (
-    <div className="flex items-center justify-between gap-3 border-t border-slate-800 bg-slate-900 px-3 py-2 text-[12px] text-white/80">
+    <div className="flex shrink-0 items-center justify-between gap-3 border-t border-slate-800 bg-slate-900 px-3 py-2 text-[12px] text-white/80">
       <div className="flex items-center gap-1.5">
         <BottomIconButton ariaLabel="Download source" onClick={onDownload}>
           <Download className="h-3.5 w-3.5" strokeWidth={1.8} />
