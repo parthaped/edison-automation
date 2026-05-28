@@ -4,8 +4,7 @@ import { start } from "workflow/api";
 import { z } from "zod";
 import { toErrorResponse } from "@/lib/edison/app-error";
 import {
-  getIngestJobStore,
-  newPerFile,
+  initialSnapshot,
   type IngestJobSnapshot,
 } from "@/lib/edison/ingest-job-store";
 import {
@@ -14,8 +13,8 @@ import {
 } from "@/lib/edison/workflows/batch-ingest";
 
 export const runtime = "nodejs";
-// The route only schedules a workflow run. The work happens out-of-band in the
-// Workflow runtime, so the request can return immediately.
+// The route only enqueues a workflow run; the actual work happens out-of-band
+// inside the Workflow runtime, so the request can return immediately.
 export const maxDuration = 30;
 
 const blobRefSchema = z.object({
@@ -81,31 +80,13 @@ async function scheduleBatchIngest(
   folderId: string | undefined,
   promptTask: "diplomatic-transcription" | "project-notebook" | undefined,
 ): Promise<IngestJobSnapshot> {
-  const batchId = `manual-${crypto.randomUUID()}`;
-  const now = new Date().toISOString();
-  const snapshot: IngestJobSnapshot = {
-    batchId,
-    status: "queued",
-    folderId,
-    totalFiles: blobs.length,
-    completedFiles: 0,
-    failedFiles: 0,
-    createdAt: now,
-    updatedAt: now,
-    perFile: newPerFile(
-      blobs.map((blob) => ({ name: blob.name, size: blob.size })),
-    ).map((entry) => ({ ...entry, stage: "uploaded" })),
-  };
-  await getIngestJobStore().write(snapshot);
-
   const run = await start(batchIngestWorkflow, [
-    { batchId, folderId, blobs, promptTask },
+    { folderId, blobs, promptTask },
   ]);
-  await getIngestJobStore().patch(batchId, (current) => ({
-    ...current,
-    runId: run.runId,
-  }));
-  return { ...snapshot, runId: run.runId };
+  return initialSnapshot(run.runId, {
+    folderId,
+    files: blobs.map((blob) => ({ name: blob.name, size: blob.size })),
+  });
 }
 
 function parsePromptTask(
@@ -117,7 +98,9 @@ function parsePromptTask(
   return undefined;
 }
 
-async function uploadFormDataFilesToBlob(formData: FormData): Promise<BlobRef[]> {
+async function uploadFormDataFilesToBlob(
+  formData: FormData,
+): Promise<BlobRef[]> {
   const blobs: BlobRef[] = [];
   for (const entry of formData.getAll("files")) {
     if (!isFile(entry)) continue;

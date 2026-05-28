@@ -31,7 +31,8 @@ describe("POST /api/ingest/manual", () => {
     );
     expect(response.status).toBe(202);
     const body = await response.json();
-    expect(body.batchId).toMatch(/^manual-/);
+    expect(body.batchId).toBe("run-test");
+    expect(body.runId).toBe("run-test");
     expect(body.status).toBe("queued");
     expect(body.totalFiles).toBe(1);
     expect(body.perFile).toHaveLength(1);

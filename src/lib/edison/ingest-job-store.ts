@@ -1,4 +1,3 @@
-import { createClient, type VercelKV } from "@vercel/kv";
 import type { ManualIngestResult } from "./service";
 
 export type FileStage =
@@ -11,11 +10,7 @@ export type FileStage =
   | "done"
   | "failed";
 
-export type JobStatus =
-  | "queued"
-  | "running"
-  | "completed"
-  | "failed";
+export type JobStatus = "queued" | "running" | "completed" | "failed";
 
 export interface FileSnapshot {
   fileName: string;
@@ -42,150 +37,221 @@ export interface IngestJobSnapshot {
   runId?: string;
 }
 
-const KEY_PREFIX = "edison:ingest:";
-const SNAPSHOT_TTL_SECONDS = 60 * 60 * 24; // 24 hours
+// ---------- Event log ----------
+//
+// The workflow runtime stores a durable event log per run (replicated Redis on
+// Vercel). We use that log instead of a side-channel KV store so the workflow
+// worker and the polling API route always agree on state without provisioning
+// an extra integration.
 
-interface IngestJobStore {
-  read(batchId: string): Promise<IngestJobSnapshot | null>;
-  write(snapshot: IngestJobSnapshot): Promise<void>;
-  patch(
-    batchId: string,
-    update: (
-      current: IngestJobSnapshot,
-    ) => IngestJobSnapshot | Promise<IngestJobSnapshot>,
-  ): Promise<IngestJobSnapshot>;
+export interface BatchStartedPayload {
+  folderId?: string;
+  files: Array<{ name: string; size?: number }>;
+  startedAt: string;
 }
 
-class InMemoryIngestJobStore implements IngestJobStore {
-  private readonly snapshots: Map<string, IngestJobSnapshot>;
-  // Per-batch async mutex so concurrent patches do not race when running on a
-  // single warm instance (e.g. local dev / hobby).
-  private readonly locks = new Map<string, Promise<unknown>>();
+export interface FileStagePayload {
+  fileName: string;
+  stage: FileStage;
+  at: string;
+}
 
-  constructor(store: Map<string, IngestJobSnapshot>) {
-    this.snapshots = store;
-  }
+export interface FileCompletedPayload {
+  fileName: string;
+  documentId: string;
+  at: string;
+}
 
-  async read(batchId: string): Promise<IngestJobSnapshot | null> {
-    return this.snapshots.get(batchId) ?? null;
-  }
+export interface FileFailedPayload {
+  fileName: string;
+  message: string;
+  at: string;
+}
 
-  async write(snapshot: IngestJobSnapshot): Promise<void> {
-    this.snapshots.set(snapshot.batchId, snapshot);
-  }
+export interface BatchCompletedPayload {
+  at: string;
+  result: ManualIngestResult;
+  completedFiles: number;
+  failedFiles: number;
+}
 
-  async patch(
-    batchId: string,
-    update: (
-      current: IngestJobSnapshot,
-    ) => IngestJobSnapshot | Promise<IngestJobSnapshot>,
-  ): Promise<IngestJobSnapshot> {
-    const previous = this.locks.get(batchId) ?? Promise.resolve();
-    const next = previous.then(async () => {
-      const current = this.snapshots.get(batchId);
-      if (!current) {
-        throw new Error(`Ingest job ${batchId} not found.`);
-      }
-      const updated = await update(current);
-      const merged: IngestJobSnapshot = {
-        ...updated,
-        updatedAt: new Date().toISOString(),
+export interface BatchFailedPayload {
+  at: string;
+  message: string;
+  completedFiles: number;
+  failedFiles: number;
+  result?: ManualIngestResult;
+}
+
+export type BatchEvent =
+  | ({ type: "batch-started" } & BatchStartedPayload)
+  | ({ type: "file-stage" } & FileStagePayload)
+  | ({ type: "file-completed" } & FileCompletedPayload)
+  | ({ type: "file-failed" } & FileFailedPayload)
+  | ({ type: "batch-completed" } & BatchCompletedPayload)
+  | ({ type: "batch-failed" } & BatchFailedPayload);
+
+// ---------- Snapshot helpers ----------
+
+export function emptySnapshot(batchId: string): IngestJobSnapshot {
+  const now = new Date().toISOString();
+  return {
+    batchId,
+    runId: batchId,
+    status: "queued",
+    totalFiles: 0,
+    completedFiles: 0,
+    failedFiles: 0,
+    createdAt: now,
+    updatedAt: now,
+    perFile: [],
+  };
+}
+
+export function initialSnapshot(
+  batchId: string,
+  options: {
+    folderId?: string;
+    files: Array<{ name: string; size?: number }>;
+  },
+): IngestJobSnapshot {
+  const now = new Date().toISOString();
+  return {
+    batchId,
+    runId: batchId,
+    status: "queued",
+    folderId: options.folderId,
+    totalFiles: options.files.length,
+    completedFiles: 0,
+    failedFiles: 0,
+    createdAt: now,
+    updatedAt: now,
+    perFile: options.files.map((file) => ({
+      fileName: file.name,
+      size: file.size,
+      stage: "uploaded",
+    })),
+  };
+}
+
+export function applyBatchEvent(
+  snapshot: IngestJobSnapshot,
+  event: BatchEvent,
+): IngestJobSnapshot {
+  switch (event.type) {
+    case "batch-started":
+      return {
+        ...snapshot,
+        status: "running",
+        folderId: event.folderId ?? snapshot.folderId,
+        totalFiles: event.files.length,
+        perFile:
+          snapshot.perFile.length === event.files.length
+            ? snapshot.perFile
+            : event.files.map((file) => ({
+                fileName: file.name,
+                size: file.size,
+                stage: "uploaded",
+              })),
+        createdAt: event.startedAt,
+        updatedAt: event.startedAt,
       };
-      this.snapshots.set(batchId, merged);
-      return merged;
-    });
-    this.locks.set(batchId, next);
-    try {
-      return await next;
-    } finally {
-      if (this.locks.get(batchId) === next) {
-        this.locks.delete(batchId);
-      }
-    }
-  }
-}
 
-class KvIngestJobStore implements IngestJobStore {
-  constructor(private readonly client: VercelKV) {}
-
-  async read(batchId: string): Promise<IngestJobSnapshot | null> {
-    return this.client.get<IngestJobSnapshot>(`${KEY_PREFIX}${batchId}`);
-  }
-
-  async write(snapshot: IngestJobSnapshot): Promise<void> {
-    await this.client.set(`${KEY_PREFIX}${snapshot.batchId}`, snapshot, {
-      ex: SNAPSHOT_TTL_SECONDS,
-    });
-  }
-
-  async patch(
-    batchId: string,
-    update: (
-      current: IngestJobSnapshot,
-    ) => IngestJobSnapshot | Promise<IngestJobSnapshot>,
-  ): Promise<IngestJobSnapshot> {
-    // Optimistic update with a short retry budget; KV is single-region serial
-    // for a given key but we may race with parallel step writes.
-    for (let attempt = 0; attempt < 5; attempt += 1) {
-      const current = await this.client.get<IngestJobSnapshot>(
-        `${KEY_PREFIX}${batchId}`,
-      );
-      if (!current) {
-        throw new Error(`Ingest job ${batchId} not found.`);
-      }
-      const updated = await update(current);
-      const merged: IngestJobSnapshot = {
-        ...updated,
-        updatedAt: new Date().toISOString(),
+    case "file-stage":
+      return {
+        ...snapshot,
+        updatedAt: event.at,
+        perFile: upsertFile(snapshot.perFile, event.fileName, (entry) => ({
+          ...entry,
+          stage: event.stage,
+          startedAt:
+            entry.startedAt ??
+            (event.stage !== "queued" && event.stage !== "uploaded"
+              ? event.at
+              : entry.startedAt),
+        })),
       };
-      await this.client.set(`${KEY_PREFIX}${batchId}`, merged, {
-        ex: SNAPSHOT_TTL_SECONDS,
-      });
-      return merged;
-    }
-    throw new Error(
-      `Failed to patch ingest job ${batchId} after 5 attempts.`,
-    );
+
+    case "file-completed":
+      return {
+        ...snapshot,
+        updatedAt: event.at,
+        completedFiles: snapshot.completedFiles + 1,
+        perFile: upsertFile(snapshot.perFile, event.fileName, (entry) => ({
+          ...entry,
+          stage: "done",
+          documentId: event.documentId,
+          finishedAt: event.at,
+        })),
+      };
+
+    case "file-failed":
+      return {
+        ...snapshot,
+        updatedAt: event.at,
+        failedFiles: snapshot.failedFiles + 1,
+        perFile: upsertFile(snapshot.perFile, event.fileName, (entry) => ({
+          ...entry,
+          stage: "failed",
+          errorMessage: event.message,
+          finishedAt: event.at,
+        })),
+      };
+
+    case "batch-completed":
+      return {
+        ...snapshot,
+        status: "completed",
+        updatedAt: event.at,
+        completedFiles: event.completedFiles,
+        failedFiles: event.failedFiles,
+        result: event.result,
+      };
+
+    case "batch-failed":
+      return {
+        ...snapshot,
+        status: "failed",
+        updatedAt: event.at,
+        completedFiles: event.completedFiles,
+        failedFiles: event.failedFiles,
+        error: event.message,
+        result: event.result ?? snapshot.result,
+      };
   }
 }
 
-const globalForStore = globalThis as unknown as {
-  edisonIngestStore?: Map<string, IngestJobSnapshot>;
-  edisonIngestStoreImpl?: IngestJobStore;
-};
-globalForStore.edisonIngestStore ??= new Map<string, IngestJobSnapshot>();
-
-function createStore(): IngestJobStore {
-  const url = process.env.KV_REST_API_URL;
-  const token = process.env.KV_REST_API_TOKEN;
-  if (url && token) {
-    const client = createClient({ url, token });
-    return new KvIngestJobStore(client);
+export function foldBatchEvents(
+  batchId: string,
+  events: Iterable<BatchEvent>,
+): IngestJobSnapshot {
+  let snapshot = emptySnapshot(batchId);
+  for (const event of events) {
+    snapshot = applyBatchEvent(snapshot, event);
   }
-  return new InMemoryIngestJobStore(globalForStore.edisonIngestStore!);
+  return snapshot;
 }
 
-export function getIngestJobStore(): IngestJobStore {
-  globalForStore.edisonIngestStoreImpl ??= createStore();
-  return globalForStore.edisonIngestStoreImpl;
-}
-
-export function newPerFile(
-  files: Array<{ name: string; size?: number }>,
-): FileSnapshot[] {
-  return files.map((file) => ({
-    fileName: file.name,
-    size: file.size,
-    stage: "queued",
-  }));
-}
-
-export function setFileStage(
+function upsertFile(
   perFile: FileSnapshot[],
   fileName: string,
-  partial: Partial<FileSnapshot>,
+  update: (entry: FileSnapshot) => FileSnapshot,
 ): FileSnapshot[] {
-  return perFile.map((entry) =>
-    entry.fileName === fileName ? { ...entry, ...partial } : entry,
-  );
+  let found = false;
+  const next = perFile.map((entry) => {
+    if (entry.fileName === fileName) {
+      found = true;
+      return update(entry);
+    }
+    return entry;
+  });
+  if (!found) {
+    next.push(
+      update({
+        fileName,
+        stage: "uploaded",
+      }),
+    );
+  }
+  return next;
 }
