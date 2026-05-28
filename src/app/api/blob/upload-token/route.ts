@@ -1,20 +1,11 @@
 import { handleUpload, type HandleUploadBody } from "@vercel/blob/client";
 import { NextResponse } from "next/server";
+import {
+  MAX_UPLOAD_BYTES,
+  TRANSCRIBABLE_MIME_TYPES,
+} from "@/lib/edison/upload-constraints";
 
 export const runtime = "nodejs";
-
-const ALLOWED_CONTENT_TYPES = [
-  "application/pdf",
-  "image/jpeg",
-  "image/jpg",
-  "image/png",
-  "image/webp",
-  "image/gif",
-  "image/tiff",
-];
-
-// 50 MB ceiling per file. Raise this when the platform/account allows.
-const MAX_SIZE_BYTES = 50 * 1024 * 1024;
 
 export async function POST(request: Request) {
   try {
@@ -23,8 +14,8 @@ export async function POST(request: Request) {
       body,
       request,
       onBeforeGenerateToken: async () => ({
-        allowedContentTypes: ALLOWED_CONTENT_TYPES,
-        maximumSizeInBytes: MAX_SIZE_BYTES,
+        allowedContentTypes: [...TRANSCRIBABLE_MIME_TYPES],
+        maximumSizeInBytes: MAX_UPLOAD_BYTES,
         addRandomSuffix: true,
       }),
       onUploadCompleted: async () => {

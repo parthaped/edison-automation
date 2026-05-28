@@ -1,8 +1,7 @@
-import { del } from "@vercel/blob";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { toErrorResponse } from "@/lib/edison/app-error";
-import { getEdisonService } from "@/lib/edison/service-factory";
+import { createManualIngestJob } from "@/lib/edison/manual-ingest-jobs";
 import type { UploadFileLike } from "@/lib/edison/service";
 
 export const runtime = "nodejs";
@@ -24,10 +23,6 @@ export async function POST(request: Request) {
   try {
     const contentType = request.headers.get("content-type") ?? "";
 
-    let files: UploadFileLike[];
-    let folderId: string | undefined;
-    let blobUrlsToDelete: string[] = [];
-
     if (contentType.includes("application/json")) {
       const parsed = jsonBodySchema.safeParse(await request.json());
       if (!parsed.success) {
@@ -36,55 +31,63 @@ export async function POST(request: Request) {
           { status: 400 },
         );
       }
-      folderId =
+      const folderId =
         parsed.data.folderId && parsed.data.folderId.trim() !== ""
           ? parsed.data.folderId
           : undefined;
 
-      files = await Promise.all(
-        parsed.data.blobs.map(async (blob) => {
-          const response = await fetch(blob.url);
-          if (!response.ok) {
-            throw new Error(
-              `Failed to fetch blob ${blob.name} from ${blob.url}: ${response.status}`,
-            );
-          }
-          const arrayBuffer = await response.arrayBuffer();
-          return {
-            name: blob.name,
-            size: blob.size || arrayBuffer.byteLength,
-            type: blob.contentType,
-            arrayBuffer: async () => arrayBuffer,
-          } satisfies UploadFileLike;
-        }),
-      );
-      blobUrlsToDelete = parsed.data.blobs.map((blob) => blob.url);
-    } else {
-      const formData = await request.formData();
-      files = formData
-        .getAll("files")
-        .filter((entry): entry is File => entry instanceof File);
-      const rawFolderId = formData.get("folderId");
-      folderId =
-        typeof rawFolderId === "string" && rawFolderId.trim() !== ""
-          ? rawFolderId
-          : undefined;
+      const job = createManualIngestJob({
+        kind: "blob",
+        blobs: parsed.data.blobs,
+        folderId,
+      });
+      return NextResponse.json(job, { status: 202 });
     }
 
-    const result = await getEdisonService().ingestManualFiles({
+    const formData = await request.formData();
+    const files: UploadFileLike[] = formData
+      .getAll("files")
+      .flatMap((entry) => {
+        const file = toUploadFileLike(entry);
+        return file ? [file] : [];
+      });
+    const rawFolderId = formData.get("folderId");
+    const folderId =
+      typeof rawFolderId === "string" && rawFolderId.trim() !== ""
+        ? rawFolderId
+        : undefined;
+
+    const job = createManualIngestJob({
+      kind: "files",
       files,
       folderId,
     });
-
-    // Clean up temporary blob uploads. The OCR text + metadata are durably
-    // stored in the response; the original bytes are no longer needed.
-    if (blobUrlsToDelete.length > 0) {
-      await Promise.allSettled(blobUrlsToDelete.map((url) => del(url)));
-    }
-
-    return NextResponse.json(result, { status: 202 });
+    return NextResponse.json(job, { status: 202 });
   } catch (error) {
     const response = toErrorResponse(error);
     return NextResponse.json(response.body, { status: response.status });
   }
+}
+
+function toUploadFileLike(entry: FormDataEntryValue): UploadFileLike | null {
+  if (
+    typeof entry === "object" &&
+    entry !== null &&
+    "arrayBuffer" in entry &&
+    typeof entry.arrayBuffer === "function" &&
+    "name" in entry &&
+    typeof entry.name === "string" &&
+    "size" in entry &&
+    typeof entry.size === "number" &&
+    "type" in entry &&
+    typeof entry.type === "string"
+  ) {
+    return {
+      name: entry.name,
+      size: entry.size,
+      type: entry.type,
+      arrayBuffer: () => entry.arrayBuffer(),
+    };
+  }
+  return null;
 }

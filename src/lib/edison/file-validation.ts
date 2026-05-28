@@ -1,6 +1,7 @@
 import type { SupportedFileKind, ValidationResult } from "./types";
+import { MAX_UPLOAD_BYTES } from "./upload-constraints";
 
-export const MAX_UPLOAD_BYTES = 250 * 1024 * 1024;
+export { MAX_UPLOAD_BYTES };
 
 const EXTENSION_TO_KIND: Record<string, SupportedFileKind> = {
   pdf: "pdf",

@@ -38,6 +38,7 @@ export interface UploadFileLike {
 export interface ManualIngestInput {
   files: UploadFileLike[];
   folderId?: string;
+  onProgress?: (progress: ManualIngestProgress) => void;
 }
 
 export interface TranscriptionError {
@@ -51,6 +52,13 @@ export interface ManualIngestResult {
   transcriptions: TranscriptionRun[];
   metadata: MetadataExtraction[];
   transcriptionErrors: TranscriptionError[];
+}
+
+export interface ManualIngestProgress {
+  fileName: string;
+  stage: "transcribing" | "extracting" | "metadata" | "saving";
+  processedFiles: number;
+  totalFiles: number;
 }
 
 export interface BatchExportRow {
@@ -265,6 +273,7 @@ export class EdisonAutomationService {
     const transcriptionErrors: TranscriptionError[] = [];
     const aiGatewayConfigured = Boolean(process.env.AI_GATEWAY_API_KEY);
 
+    const totalFiles = input.files.length;
     for (const [index, file] of input.files.entries()) {
       const bytes = new Uint8Array(await file.arrayBuffer());
       const sourceFile: SourceFile = {
@@ -281,6 +290,13 @@ export class EdisonAutomationService {
 
       if (aiGatewayConfigured && isTranscribableMediaType(sourceFile.mimeType)) {
         try {
+          const startedAt = Date.now();
+          input.onProgress?.({
+            fileName: sourceFile.name,
+            stage: "transcribing",
+            processedFiles: index,
+            totalFiles,
+          });
           const transcribed = await transcribeDocument({
             bytes,
             mediaType: sourceFile.mimeType,
@@ -289,6 +305,7 @@ export class EdisonAutomationService {
           transcribeModel = transcribed.model;
           transcribeInputTokens = transcribed.inputTokens;
           transcribeOutputTokens = transcribed.outputTokens;
+          logIngestStep("transcription", sourceFile.name, startedAt);
         } catch (error) {
           transcriptionErrors.push({
             fileName: sourceFile.name,
@@ -298,6 +315,12 @@ export class EdisonAutomationService {
         }
       }
 
+      input.onProgress?.({
+        fileName: sourceFile.name,
+        stage: "extracting",
+        processedFiles: index,
+        totalFiles,
+      });
       const processed = await processSourceFile({
         sourceFile,
         bytes,
@@ -312,6 +335,13 @@ export class EdisonAutomationService {
       let documentMetadata: MetadataExtraction = processed.metadata;
       if (aiGatewayConfigured && rawOcrText && rawOcrText.trim().length > 0) {
         try {
+          const startedAt = Date.now();
+          input.onProgress?.({
+            fileName: sourceFile.name,
+            stage: "metadata",
+            processedFiles: index,
+            totalFiles,
+          });
           const indexed = await extractMetadata({
             documentId: processed.documentPackage.documentId,
             folderId: processed.documentPackage.folderId,
@@ -320,6 +350,7 @@ export class EdisonAutomationService {
             confidence: processed.confidence,
           });
           documentMetadata = indexed.metadata;
+          logIngestStep("metadata", sourceFile.name, startedAt);
         } catch (error) {
           transcriptionErrors.push({
             fileName: sourceFile.name,
@@ -345,6 +376,12 @@ export class EdisonAutomationService {
       packages.push(documentPackage);
       transcriptions.push(transcription);
       metadata.push(documentMetadata);
+      input.onProgress?.({
+        fileName: sourceFile.name,
+        stage: "saving",
+        processedFiles: index + 1,
+        totalFiles,
+      });
     }
 
     await this.repository.saveProcessedDocuments(packages, transcriptions, metadata);
@@ -586,6 +623,14 @@ export class EdisonAutomationService {
       agentScript: buildAgentImprovementScript({ candidate, calibrations }),
     };
   }
+}
+
+function logIngestStep(stage: string, fileName: string, startedAt: number) {
+  console.info("[manual-ingest]", {
+    stage,
+    fileName,
+    elapsedMs: Date.now() - startedAt,
+  });
 }
 
 async function buildBatchZip(rows: BatchExportRow[]): Promise<{

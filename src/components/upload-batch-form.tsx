@@ -13,20 +13,25 @@ import type {
   DocumentPackage,
   TranscriptionRun,
 } from "@/lib/edison/types";
-
-const ACCEPTED_MIME = [
-  "application/pdf",
-  "image/jpeg",
-  "image/jpg",
-  "image/png",
-  "image/webp",
-  "image/gif",
-  "image/tiff",
-];
-
-const ACCEPT_ATTR = ACCEPTED_MIME.join(",");
+import type { ManualIngestJobSnapshot } from "@/lib/edison/manual-ingest-jobs";
+import {
+  ACCEPT_ATTR,
+  ACCEPTED_UPLOAD_EXTENSIONS,
+  ACCEPTED_UPLOAD_MIME_TYPES,
+  DIRECT_INGEST_MAX_BYTES,
+  MAX_UPLOAD_BYTES,
+} from "@/lib/edison/upload-constraints";
 
 type Status = "idle" | "uploading" | "processing" | "success" | "error";
+
+interface UploadProgressState {
+  fileName: string;
+  fileIndex: number;
+  totalFiles: number;
+  loadedBytes: number;
+  totalBytes: number;
+  percentage: number;
+}
 
 async function safeReadJson(
   response: Response,
@@ -49,18 +54,27 @@ interface PerFileRow {
   errors: TranscriptionError[];
 }
 
-export function UploadBatchForm() {
+interface UploadBatchFormProps {
+  blobReady: boolean;
+}
+
+export function UploadBatchForm({ blobReady }: UploadBatchFormProps) {
   const filesInputId = useId();
   const folderInputId = useId();
   const formRef = useRef<HTMLFormElement | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
   const [files, setFiles] = useState<File[]>([]);
   const [status, setStatus] = useState<Status>("idle");
   const [result, setResult] = useState<ManualIngestResult | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [uploadProgress, setUploadProgress] =
+    useState<UploadProgressState | null>(null);
+  const [ingestJob, setIngestJob] = useState<ManualIngestJobSnapshot | null>(null);
 
   const canDownload = Boolean(result && result.packages.length > 0);
   const [downloading, setDownloading] = useState(false);
   const rows: PerFileRow[] = buildPerFileRows(files, result);
+  const busy = status === "uploading" || status === "processing";
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -76,58 +90,39 @@ export function UploadBatchForm() {
         ? rawFolderId.trim()
         : undefined;
 
+    const validationError = validateFiles(files, blobReady);
+    if (validationError) {
+      setStatus("error");
+      setErrorMessage(validationError);
+      toast.error("Upload blocked", { description: validationError });
+      return;
+    }
+
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
     setStatus("uploading");
     setErrorMessage(null);
     setResult(null);
+    setIngestJob(null);
+    setUploadProgress(null);
 
     try {
-      // Step 1: upload each file directly to Vercel Blob from the browser.
-      // This bypasses the 4.5 MB serverless function body limit.
-      const blobs = [] as Array<{
-        url: string;
-        name: string;
-        size: number;
-        contentType: string;
-      }>;
-      for (const file of files) {
-        const result = await upload(file.name, file, {
-          access: "public",
-          handleUploadUrl: "/api/blob/upload-token",
-          contentType: file.type || "application/octet-stream",
-        });
-        blobs.push({
-          url: result.url,
-          name: file.name,
-          size: file.size,
-          contentType: file.type || "application/octet-stream",
-        });
-      }
+      const job = blobReady
+        ? await uploadFilesToBlob(files, folderId, abortController.signal, setUploadProgress)
+        : await uploadFilesDirectly(files, folderId, abortController.signal);
 
-      // Step 2: hand the blob refs to the ingest pipeline. The server fetches
-      // bytes from Blob, runs OCR + metadata extraction, and cleans up.
       setStatus("processing");
-      const response = await fetch("/api/ingest/manual", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ blobs, folderId }),
-      });
-      const payload = (await safeReadJson(response)) as
-        | ManualIngestResult
-        | { error?: string };
+      setIngestJob(job);
+      const success = await waitForIngestJob(
+        job.batchId,
+        abortController.signal,
+        setIngestJob,
+      );
 
-      if (!response.ok) {
-        const message =
-          (payload as { error?: string }).error ??
-          `Upload failed with status ${response.status}.`;
-        setStatus("error");
-        setErrorMessage(message);
-        toast.error("Upload failed", { description: message });
-        return;
-      }
-
-      const success = payload as ManualIngestResult;
       setResult(success);
       setStatus("success");
+      setUploadProgress(null);
+      setIngestJob(null);
       toast.success(
         `Processed ${success.packages.length} file${success.packages.length === 1 ? "" : "s"}`,
         {
@@ -142,16 +137,28 @@ export function UploadBatchForm() {
         error instanceof Error ? error.message : "Unknown network error.";
       setStatus("error");
       setErrorMessage(message);
-      toast.error("Upload failed", { description: message });
+      toast.error(
+        abortController.signal.aborted ? "Upload canceled" : "Upload failed",
+        { description: message },
+      );
+    } finally {
+      abortControllerRef.current = null;
     }
   }
 
   function handleReset() {
+    abortControllerRef.current?.abort();
     setFiles([]);
     setResult(null);
     setStatus("idle");
     setErrorMessage(null);
+    setUploadProgress(null);
+    setIngestJob(null);
     formRef.current?.reset();
+  }
+
+  function handleCancel() {
+    abortControllerRef.current?.abort();
   }
 
   async function handleDownload() {
@@ -264,12 +271,12 @@ export function UploadBatchForm() {
         <div className="mt-5 flex flex-wrap items-center gap-2">
           <Button
             type="submit"
-            disabled={status === "uploading" || status === "processing"}
+            disabled={busy}
           >
             {status === "uploading" ? (
               <>
                 <Loader2 className="animate-spin" aria-hidden="true" />
-                Uploading
+                Uploading{uploadProgress ? ` ${uploadProgress.percentage}%` : ""}
               </>
             ) : status === "processing" ? (
               <>
@@ -283,12 +290,17 @@ export function UploadBatchForm() {
               </>
             )}
           </Button>
+          {busy ? (
+            <Button type="button" variant="outline" onClick={handleCancel}>
+              Cancel
+            </Button>
+          ) : null}
           {status !== "idle" ? (
             <Button
               type="button"
               variant="outline"
               onClick={handleReset}
-              disabled={status === "uploading" || status === "processing"}
+              disabled={busy}
             >
               Start new batch
             </Button>
@@ -309,6 +321,9 @@ export function UploadBatchForm() {
             </Button>
           ) : null}
         </div>
+
+        {uploadProgress ? <UploadProgressSummary progress={uploadProgress} /> : null}
+        {ingestJob ? <IngestJobSummary job={ingestJob} /> : null}
 
         {errorMessage ? (
           <p className="mt-3 text-sm text-rose-600">{errorMessage}</p>
@@ -419,6 +434,227 @@ function buildPerFileRows(
   });
 }
 
+async function uploadFilesToBlob(
+  files: File[],
+  folderId: string | undefined,
+  signal: AbortSignal,
+  onProgress: (progress: UploadProgressState) => void,
+): Promise<ManualIngestJobSnapshot> {
+  const blobs = [] as Array<{
+    url: string;
+    name: string;
+    size: number;
+    contentType: string;
+  }>;
+
+  for (const [index, file] of files.entries()) {
+    onProgress({
+      fileName: file.name,
+      fileIndex: index + 1,
+      totalFiles: files.length,
+      loadedBytes: 0,
+      totalBytes: file.size,
+      percentage: 0,
+    });
+    const result = await upload(file.name, file, {
+      access: "public",
+      handleUploadUrl: "/api/blob/upload-token",
+      contentType: file.type || "application/octet-stream",
+      multipart: true,
+      abortSignal: signal,
+      onUploadProgress: (progress) => {
+        onProgress({
+          fileName: file.name,
+          fileIndex: index + 1,
+          totalFiles: files.length,
+          loadedBytes: progress.loaded,
+          totalBytes: progress.total,
+          percentage: Math.round(progress.percentage),
+        });
+      },
+    });
+    blobs.push({
+      url: result.url,
+      name: file.name,
+      size: file.size,
+      contentType: file.type || "application/octet-stream",
+    });
+  }
+
+  const response = await fetch("/api/ingest/manual", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ blobs, folderId }),
+    signal,
+  });
+  return parseJobResponse(response);
+}
+
+async function uploadFilesDirectly(
+  files: File[],
+  folderId: string | undefined,
+  signal: AbortSignal,
+): Promise<ManualIngestJobSnapshot> {
+  const formData = new FormData();
+  for (const file of files) {
+    formData.append("files", file);
+  }
+  if (folderId) {
+    formData.append("folderId", folderId);
+  }
+
+  const response = await fetch("/api/ingest/manual", {
+    method: "POST",
+    body: formData,
+    signal,
+  });
+  return parseJobResponse(response);
+}
+
+async function parseJobResponse(response: Response): Promise<ManualIngestJobSnapshot> {
+  const payload = (await safeReadJson(response)) as
+    | ManualIngestJobSnapshot
+    | ErrorPayload;
+  if (!response.ok) {
+    throw new Error(getErrorMessage(payload, `Upload failed with status ${response.status}.`));
+  }
+  if (!("batchId" in payload)) {
+    throw new Error("Upload did not return a batch id.");
+  }
+  return payload;
+}
+
+async function waitForIngestJob(
+  batchId: string,
+  signal: AbortSignal,
+  onUpdate: (job: ManualIngestJobSnapshot) => void,
+): Promise<ManualIngestResult> {
+  while (!signal.aborted) {
+    const response = await fetch(`/api/ingest/manual/${batchId}`, {
+      cache: "no-store",
+      signal,
+    });
+    const payload = (await safeReadJson(response)) as
+      | ManualIngestJobSnapshot
+      | ErrorPayload;
+    if (!response.ok) {
+      throw new Error(
+        getErrorMessage(payload, `Batch status failed with ${response.status}.`),
+      );
+    }
+    if (!("batchId" in payload)) {
+      throw new Error("Batch status response did not include a batch id.");
+    }
+
+    onUpdate(payload);
+    if (payload.status === "completed" && payload.result) {
+      return payload.result;
+    }
+    if (payload.status === "failed") {
+      throw new Error(payload.error ?? "Transcription failed.");
+    }
+
+    await sleep(1000, signal);
+  }
+
+  throw new Error("Upload canceled.");
+}
+
+function sleep(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timeout = window.setTimeout(resolve, ms);
+    signal.addEventListener(
+      "abort",
+      () => {
+        window.clearTimeout(timeout);
+        reject(new Error("Upload canceled."));
+      },
+      { once: true },
+    );
+  });
+}
+
+type ErrorPayload =
+  | { error?: string }
+  | { error?: { message?: string; code?: string } };
+
+function getErrorMessage(payload: ErrorPayload | unknown, fallback: string): string {
+  if (payload && typeof payload === "object" && "error" in payload) {
+    const error = (payload as ErrorPayload).error;
+    if (typeof error === "string" && error.trim()) return error;
+    if (
+      error &&
+      typeof error === "object" &&
+      "message" in error &&
+      typeof error.message === "string" &&
+      error.message.trim()
+    ) {
+      return error.message;
+    }
+  }
+  return fallback;
+}
+
+function validateFiles(files: File[], blobReady: boolean): string | null {
+  const acceptedMimeTypes = new Set<string>(ACCEPTED_UPLOAD_MIME_TYPES);
+  const acceptedExtensions = new Set<string>(ACCEPTED_UPLOAD_EXTENSIONS);
+  const totalBytes = files.reduce((sum, file) => sum + file.size, 0);
+
+  for (const file of files) {
+    if (file.size > MAX_UPLOAD_BYTES) {
+      return `${file.name} is ${humanFileSize(file.size)}. The per-file limit is ${humanFileSize(MAX_UPLOAD_BYTES)}.`;
+    }
+    const extension = `.${file.name.toLowerCase().split(".").at(-1) ?? ""}`;
+    const mimeType = file.type.toLowerCase();
+    if (!acceptedMimeTypes.has(mimeType) && !acceptedExtensions.has(extension)) {
+      return `${file.name} is not a supported PDF or image file.`;
+    }
+  }
+
+  if (!blobReady && totalBytes > DIRECT_INGEST_MAX_BYTES) {
+    return `Vercel Blob is not configured, so direct uploads are limited to ${humanFileSize(DIRECT_INGEST_MAX_BYTES)} per batch.`;
+  }
+
+  return null;
+}
+
+function UploadProgressSummary({ progress }: { progress: UploadProgressState }) {
+  return (
+    <div className="mt-4 rounded-md border border-border bg-muted/30 p-3 text-sm">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="font-medium text-foreground">
+          Uploading {progress.fileIndex} of {progress.totalFiles}: {progress.fileName}
+        </p>
+        <p className="text-[12px] text-muted-foreground">
+          {humanFileSize(progress.loadedBytes)} / {humanFileSize(progress.totalBytes)}
+        </p>
+      </div>
+      <div className="mt-2 h-2 overflow-hidden rounded-full bg-background">
+        <div
+          className="h-full rounded-full bg-primary transition-[width]"
+          style={{ width: `${progress.percentage}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
+function IngestJobSummary({ job }: { job: ManualIngestJobSnapshot }) {
+  return (
+    <div className="mt-4 rounded-md border border-border bg-muted/30 p-3 text-sm">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="font-medium text-foreground">
+          {job.stage.replaceAll("-", " ")}
+          {job.currentFileName ? `: ${job.currentFileName}` : ""}
+        </p>
+        <p className="text-[12px] text-muted-foreground">
+          {job.processedFiles} / {job.totalFiles} files
+        </p>
+      </div>
+    </div>
+  );
+}
+
 function buildMetadataSummary(
   documentId: string,
   _result: ManualIngestResult,
@@ -426,6 +662,7 @@ function buildMetadataSummary(
   // Metadata is not returned by the API today; intentionally omitted to keep
   // the UI honest. Reviewers see metadata in the workbench / ZIP download.
   void documentId;
+  void _result;
   return undefined;
 }
 

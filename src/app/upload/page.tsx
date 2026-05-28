@@ -74,7 +74,7 @@ export default function UploadPage() {
         </section>
 
         <section className="mt-6" aria-label="Upload form">
-          <UploadBatchForm />
+          <UploadBatchForm blobReady={blobReady} />
         </section>
       </main>
     </div>
