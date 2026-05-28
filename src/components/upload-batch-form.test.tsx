@@ -41,7 +41,7 @@ describe("UploadBatchForm", () => {
     ).toBeInTheDocument();
   });
 
-  it("uses multipart Blob upload progress and polls the ingest job", async () => {
+  it("uses single-part Blob upload for small files", async () => {
     const user = userEvent.setup();
     const file = new File(["pdf"], "D9032-00001.pdf", { type: "application/pdf" });
     const job = makeJob({ status: "queued", stage: "queued" });
@@ -80,7 +80,8 @@ describe("UploadBatchForm", () => {
         "D9032-00001.pdf",
         file,
         expect.objectContaining({
-          multipart: true,
+          multipart: false,
+          contentType: "application/pdf",
           handleUploadUrl: "/api/blob/upload-token",
           onUploadProgress: expect.any(Function),
         }),
@@ -93,6 +94,37 @@ describe("UploadBatchForm", () => {
       );
     });
     expect((await screen.findAllByText("D9032-00001")).length).toBeGreaterThan(0);
+  });
+
+  it("uses multipart Blob upload for large files", async () => {
+    const user = userEvent.setup();
+    const file = new File(["x"], "large-scan.pdf", { type: "application/pdf" });
+    Object.defineProperty(file, "size", { value: 9 * 1024 * 1024 });
+    vi.mocked(upload).mockResolvedValue({
+      url: "https://blob.example/large-scan.pdf",
+      downloadUrl: "https://blob.example/large-scan.pdf",
+      pathname: "large-scan.pdf",
+      contentType: "application/pdf",
+      contentDisposition: "inline",
+      etag: "etag-2",
+    });
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      jsonResponse(makeJob({ status: "queued" }), 202),
+    );
+
+    render(<UploadBatchForm blobReady />);
+
+    const input = screen.getByLabelText("Files");
+    await user.upload(input, file);
+    fireEvent.submit(input.closest("form")!);
+
+    await waitFor(() => {
+      expect(upload).toHaveBeenCalledWith(
+        "large-scan.pdf",
+        file,
+        expect.objectContaining({ multipart: true }),
+      );
+    });
   });
 });
 

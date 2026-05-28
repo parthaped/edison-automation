@@ -18,10 +18,6 @@ export async function POST(request: Request) {
         maximumSizeInBytes: MAX_UPLOAD_BYTES,
         addRandomSuffix: true,
       }),
-      onUploadCompleted: async () => {
-        // No-op. The browser POSTs blob refs to /api/ingest/manual after upload
-        // completes, so we don't need to react to the platform's webhook.
-      },
     });
 
     return NextResponse.json(jsonResponse);

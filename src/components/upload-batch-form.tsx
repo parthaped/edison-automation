@@ -18,8 +18,11 @@ import {
   ACCEPT_ATTR,
   ACCEPTED_UPLOAD_EXTENSIONS,
   ACCEPTED_UPLOAD_MIME_TYPES,
+  BLOB_UPLOAD_TIMEOUT_MS,
   DIRECT_INGEST_MAX_BYTES,
+  inferUploadContentType,
   MAX_UPLOAD_BYTES,
+  shouldUseBlobMultipartUpload,
 } from "@/lib/edison/upload-constraints";
 
 type Status = "idle" | "uploading" | "processing" | "success" | "error";
@@ -434,6 +437,35 @@ function buildPerFileRows(
   });
 }
 
+async function uploadWithTimeout(
+  pathname: string,
+  body: File,
+  options: Parameters<typeof upload>[2],
+  signal: AbortSignal,
+) {
+  const uploadController = new AbortController();
+  const onParentAbort = () => uploadController.abort();
+  signal.addEventListener("abort", onParentAbort, { once: true });
+  const timeoutId = setTimeout(() => uploadController.abort(), BLOB_UPLOAD_TIMEOUT_MS);
+
+  try {
+    return await upload(pathname, body, {
+      ...options,
+      abortSignal: uploadController.signal,
+    });
+  } catch (error) {
+    if (uploadController.signal.aborted && !signal.aborted) {
+      throw new Error(
+        `Upload timed out after ${BLOB_UPLOAD_TIMEOUT_MS / 1000} seconds. Check your network connection and try again.`,
+      );
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+    signal.removeEventListener("abort", onParentAbort);
+  }
+}
+
 async function uploadFilesToBlob(
   files: File[],
   folderId: string | undefined,
@@ -456,28 +488,34 @@ async function uploadFilesToBlob(
       totalBytes: file.size,
       percentage: 0,
     });
-    const result = await upload(file.name, file, {
-      access: "public",
-      handleUploadUrl: "/api/blob/upload-token",
-      contentType: file.type || "application/octet-stream",
-      multipart: true,
-      abortSignal: signal,
-      onUploadProgress: (progress) => {
-        onProgress({
-          fileName: file.name,
-          fileIndex: index + 1,
-          totalFiles: files.length,
-          loadedBytes: progress.loaded,
-          totalBytes: progress.total,
-          percentage: Math.round(progress.percentage),
-        });
+    const contentType = inferUploadContentType(file.name, file.type);
+    const multipart = shouldUseBlobMultipartUpload(file.size);
+    const result = await uploadWithTimeout(
+      file.name,
+      file,
+      {
+        access: "public",
+        handleUploadUrl: "/api/blob/upload-token",
+        contentType,
+        multipart,
+        onUploadProgress: (progress) => {
+          onProgress({
+            fileName: file.name,
+            fileIndex: index + 1,
+            totalFiles: files.length,
+            loadedBytes: progress.loaded,
+            totalBytes: progress.total,
+            percentage: Math.round(progress.percentage),
+          });
+        },
       },
-    });
+      signal,
+    );
     blobs.push({
       url: result.url,
       name: file.name,
       size: file.size,
-      contentType: file.type || "application/octet-stream",
+      contentType,
     });
   }
 
@@ -596,7 +634,6 @@ function getErrorMessage(payload: ErrorPayload | unknown, fallback: string): str
 }
 
 function validateFiles(files: File[], blobReady: boolean): string | null {
-  const acceptedMimeTypes = new Set<string>(ACCEPTED_UPLOAD_MIME_TYPES);
   const acceptedExtensions = new Set<string>(ACCEPTED_UPLOAD_EXTENSIONS);
   const totalBytes = files.reduce((sum, file) => sum + file.size, 0);
 
@@ -605,8 +642,13 @@ function validateFiles(files: File[], blobReady: boolean): string | null {
       return `${file.name} is ${humanFileSize(file.size)}. The per-file limit is ${humanFileSize(MAX_UPLOAD_BYTES)}.`;
     }
     const extension = `.${file.name.toLowerCase().split(".").at(-1) ?? ""}`;
-    const mimeType = file.type.toLowerCase();
-    if (!acceptedMimeTypes.has(mimeType) && !acceptedExtensions.has(extension)) {
+    const mimeType = inferUploadContentType(file.name, file.type);
+    if (
+      !ACCEPTED_UPLOAD_MIME_TYPES.includes(
+        mimeType as (typeof ACCEPTED_UPLOAD_MIME_TYPES)[number],
+      ) &&
+      !acceptedExtensions.has(extension)
+    ) {
       return `${file.name} is not a supported PDF or image file.`;
     }
   }
