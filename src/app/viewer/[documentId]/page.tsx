@@ -1,44 +1,21 @@
+import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { DocumentViewer } from "@/components/document-viewer";
-import type {
-  DocumentViewerPanel,
-  DocumentViewerTheme,
-} from "@/components/document-viewer";
 import { getEdisonService } from "@/lib/edison/service-factory";
+
+export const metadata: Metadata = {
+  title: "Edison Papers \u00b7 Document viewer",
+  description:
+    "Side-by-side viewer for Edison Papers source images and transcriptions.",
+  robots: { index: false, follow: false },
+};
 
 interface ViewerPageProps {
   params: Promise<{ documentId: string }>;
-  searchParams: Promise<{
-    page?: string;
-    panel?: string;
-    theme?: string;
-  }>;
 }
 
-function parsePanel(value: string | undefined): DocumentViewerPanel {
-  if (value === "thumbnails" || value === "both") {
-    return value;
-  }
-  return "transcription";
-}
-
-function parseTheme(value: string | undefined): DocumentViewerTheme {
-  return value === "dark" ? "dark" : "light";
-}
-
-function parsePage(value: string | undefined): number {
-  const parsed = Number.parseInt(value ?? "", 10);
-  if (Number.isFinite(parsed) && parsed > 0) {
-    return parsed;
-  }
-  return 1;
-}
-
-export default async function ViewerPage({
-  params,
-  searchParams,
-}: ViewerPageProps) {
-  const [{ documentId }, query] = await Promise.all([params, searchParams]);
+export default async function ViewerPage({ params }: ViewerPageProps) {
+  const { documentId } = await params;
 
   const reviewCase = await getEdisonService().getReviewCase(documentId);
 
@@ -59,10 +36,6 @@ export default async function ViewerPage({
       <DocumentViewer
         document={document}
         transcription={reviewCase.transcription}
-        mode="embed"
-        initialPage={parsePage(query.page)}
-        initialPanel={parsePanel(query.panel)}
-        theme={parseTheme(query.theme)}
         className="flex-1"
       />
     </main>

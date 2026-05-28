@@ -20,7 +20,7 @@ import {
   Share2,
   Square,
 } from "lucide-react";
-import { motion } from "motion/react";
+import { motion, type Transition } from "motion/react";
 import {
   useCallback,
   useEffect,
@@ -33,34 +33,25 @@ import {
   type WheelEvent as ReactWheelEvent,
 } from "react";
 import { toast } from "sonner";
-import { motionSpring } from "@/components/motion-primitives";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+
+const motionSpring: Transition = {
+  type: "spring",
+  stiffness: 220,
+  damping: 28,
+  mass: 0.6,
+};
 import { cn } from "@/lib/utils";
 import type { DocumentPackage, PageImage, TranscriptionRun } from "@/lib/edison/types";
-
-export type DocumentViewerMode = "workbench" | "embed";
-export type DocumentViewerPanel = "transcription" | "thumbnails" | "both";
-export type DocumentViewerTheme = "light" | "dark";
 
 export interface DocumentViewerProps {
   document: DocumentPackage;
   transcription: TranscriptionRun;
-  mode?: DocumentViewerMode;
-  initialPage?: number;
-  initialPanel?: DocumentViewerPanel;
-  theme?: DocumentViewerTheme;
-  onPageChange?: (page: number) => void;
   onTranscriptionChange?: (text: string) => void;
   className?: string;
 }
 
 type ViewLayout = "single" | "two-page" | "grid";
-
-interface PostMessageEnvelope {
-  source: "edison-viewer";
-  type: "pageChanged" | "transcriptionChanged" | "setPage" | "setPanel";
-  payload: unknown;
-}
 
 const ZOOM_MIN = 0.5;
 const ZOOM_MAX = 4;
@@ -69,11 +60,6 @@ const ZOOM_STEP = 0.25;
 export function DocumentViewer({
   document,
   transcription,
-  mode = "workbench",
-  initialPage = 1,
-  initialPanel = "transcription",
-  theme = "light",
-  onPageChange,
   onTranscriptionChange,
   className,
 }: DocumentViewerProps) {
@@ -81,28 +67,18 @@ export function DocumentViewer({
   const pageCount = pages.length;
   const hasPages = pageCount > 0;
 
-  const clampedInitialPage = Math.min(Math.max(initialPage, 1), Math.max(pageCount, 1));
-  const [activePage, setActivePage] = useState(clampedInitialPage - 1);
-  const [pageInput, setPageInput] = useState(String(clampedInitialPage));
+  const [activePage, setActivePage] = useState(0);
+  const [pageInput, setPageInput] = useState("1");
   const [viewLayout, setViewLayout] = useState<ViewLayout>("single");
   const [zoom, setZoom] = useState(1);
   const [rotation, setRotation] = useState(0);
   const [pan, setPan] = useState({ x: 0, y: 0 });
-  const [leftOpen, setLeftOpen] = useState(
-    initialPanel === "thumbnails" || initialPanel === "both",
-  );
-  const [rightOpen, setRightOpen] = useState(
-    initialPanel === "transcription" || initialPanel === "both",
-  );
+  const [leftOpen, setLeftOpen] = useState(false);
+  const [rightOpen, setRightOpen] = useState(true);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [editedText, setEditedText] = useState(transcription.diplomaticText);
   const [lastTranscriptionId, setLastTranscriptionId] = useState(transcription.id);
   const [lastActivePage, setLastActivePage] = useState(activePage);
-  const [scrollHint, setScrollHint] = useState<{
-    top: number;
-    height: number;
-    key: number;
-  } | null>(null);
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
@@ -125,77 +101,17 @@ export function DocumentViewer({
   }
 
   useEffect(() => {
-    onPageChange?.(activePage + 1);
-  }, [activePage, onPageChange]);
-
-  useEffect(() => {
-    if (mode !== "embed" || typeof window === "undefined") {
-      return;
-    }
-    window.parent?.postMessage(
-      {
-        source: "edison-viewer",
-        type: "pageChanged",
-        payload: { page: activePage + 1, documentId: document.documentId },
-      } satisfies PostMessageEnvelope,
-      "*",
-    );
-  }, [activePage, document.documentId, mode]);
-
-  useEffect(() => {
-    if (mode !== "embed" || typeof window === "undefined") {
-      return;
-    }
-    function handleMessage(event: MessageEvent<PostMessageEnvelope>) {
-      const data = event.data;
-      if (!data || typeof data !== "object" || data.source !== "edison-viewer") {
-        return;
-      }
-      if (data.type === "setPage") {
-        const payload = data.payload as { page?: number } | undefined;
-        const nextPage = Number(payload?.page ?? 1);
-        if (Number.isFinite(nextPage) && pageCount > 0) {
-          setActivePage(Math.min(Math.max(nextPage - 1, 0), pageCount - 1));
-        }
-      } else if (data.type === "setPanel") {
-        const payload = data.payload as { panel?: DocumentViewerPanel } | undefined;
-        const panel = payload?.panel;
-        if (panel === "transcription") {
-          setLeftOpen(false);
-          setRightOpen(true);
-        } else if (panel === "thumbnails") {
-          setLeftOpen(true);
-          setRightOpen(false);
-        } else if (panel === "both") {
-          setLeftOpen(true);
-          setRightOpen(true);
-        }
-      }
-    }
-    window.addEventListener("message", handleMessage);
-    return () => window.removeEventListener("message", handleMessage);
-  }, [mode, pageCount]);
-
-  useEffect(() => {
     if (!textareaRef.current || pageCount <= 1) {
       return;
     }
     const ta = textareaRef.current;
     const ratio = activePage / Math.max(1, pageCount - 1);
-    const sliceHeight = ta.scrollHeight / pageCount;
     const targetTop = ratio * Math.max(0, ta.scrollHeight - ta.clientHeight);
     if (typeof ta.scrollTo === "function") {
       ta.scrollTo({ top: targetTop, behavior: "smooth" });
     } else {
       ta.scrollTop = targetTop;
     }
-    setScrollHint({
-      top: sliceHeight * activePage,
-      height: sliceHeight,
-      key: Date.now(),
-    });
-    const timeout = window.setTimeout(() => setScrollHint(null), 1400);
-    return () => window.clearTimeout(timeout);
   }, [activePage, pageCount, editedText.length]);
 
   const goTo = useCallback(
@@ -307,16 +223,6 @@ export function DocumentViewer({
     const next = event.target.value;
     setEditedText(next);
     onTranscriptionChange?.(next);
-    if (mode === "embed" && typeof window !== "undefined") {
-      window.parent?.postMessage(
-        {
-          source: "edison-viewer",
-          type: "transcriptionChanged",
-          payload: { text: next, documentId: document.documentId },
-        } satisfies PostMessageEnvelope,
-        "*",
-      );
-    }
   }
 
   function selectUncertain(token: string) {
@@ -343,15 +249,12 @@ export function DocumentViewer({
     if (typeof window === "undefined") return;
     const params = new URLSearchParams();
     params.set("page", String(activePage + 1));
-    if (rightOpen && !leftOpen) params.set("panel", "transcription");
-    else if (leftOpen && !rightOpen) params.set("panel", "thumbnails");
-    else if (leftOpen && rightOpen) params.set("panel", "both");
     const href = `${window.location.origin}/viewer/${document.documentId}?${params.toString()}`;
     try {
       await navigator.clipboard.writeText(href);
-      toast.success("Embed link copied", { description: href });
+      toast.success("Share link copied", { description: href });
     } catch {
-      toast.message("Embed link", { description: href });
+      toast.message("Share link", { description: href });
     }
   }
 
@@ -379,19 +282,12 @@ export function DocumentViewer({
   const characterCount = editedText.length;
   const uncertain = transcription.uncertainReadings ?? [];
 
-  const wrapperTheme =
-    theme === "dark" ? "edison-viewer-dark" : "edison-viewer-light";
-
   return (
     <section
       ref={containerRef}
-      data-mode={mode}
-      data-theme={theme}
       aria-label="Source and transcription viewer"
       className={cn(
-        "edison-viewer relative overflow-hidden border border-border bg-card",
-        wrapperTheme,
-        mode === "embed" ? "h-full min-h-[640px]" : "min-h-[680px]",
+        "edison-viewer relative overflow-hidden border border-border bg-card min-h-[680px]",
         className,
       )}
     >
@@ -470,7 +366,6 @@ export function DocumentViewer({
             uncertain={uncertain}
             onChange={handleTextareaChange}
             onSelectUncertain={selectUncertain}
-            scrollHint={scrollHint}
             onClose={() => setRightOpen(false)}
           />
         ) : null}
@@ -1256,7 +1151,6 @@ interface TranscriptionPaneProps {
   uncertain: string[];
   onChange: (event: React.ChangeEvent<HTMLTextAreaElement>) => void;
   onSelectUncertain: (token: string) => void;
-  scrollHint: { top: number; height: number; key: number } | null;
   onClose: () => void;
 }
 
@@ -1268,7 +1162,6 @@ function TranscriptionPane({
   uncertain,
   onChange,
   onSelectUncertain,
-  scrollHint,
   onClose,
 }: TranscriptionPaneProps) {
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
@@ -1332,17 +1225,6 @@ function TranscriptionPane({
       ) : null}
 
       <div className="relative min-h-0 flex-1 px-4 py-3">
-        {scrollHint ? (
-          <motion.div
-            key={scrollHint.key}
-            initial={{ opacity: 0.85 }}
-            animate={{ opacity: 0 }}
-            transition={{ duration: 1.2, ease: "easeOut" }}
-            aria-hidden="true"
-            className="pointer-events-none absolute left-4 right-6 rounded-sm bg-primary/15 ring-1 ring-primary/30"
-            style={{ top: scrollHint.top + 12, height: scrollHint.height }}
-          />
-        ) : null}
         <textarea
           ref={textareaRef}
           id="transcription"

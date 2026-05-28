@@ -1,11 +1,22 @@
+import { put } from "@vercel/blob";
 import { NextResponse } from "next/server";
+import { start } from "workflow/api";
 import { z } from "zod";
 import { toErrorResponse } from "@/lib/edison/app-error";
-import { createManualIngestJob } from "@/lib/edison/manual-ingest-jobs";
-import type { UploadFileLike } from "@/lib/edison/service";
+import {
+  getIngestJobStore,
+  newPerFile,
+  type IngestJobSnapshot,
+} from "@/lib/edison/ingest-job-store";
+import {
+  batchIngestWorkflow,
+  type BlobRef,
+} from "@/lib/edison/workflows/batch-ingest";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+// The route only schedules a workflow run. The work happens out-of-band in the
+// Workflow runtime, so the request can return immediately.
+export const maxDuration = 30;
 
 const blobRefSchema = z.object({
   url: z.string().url(),
@@ -17,6 +28,9 @@ const blobRefSchema = z.object({
 const jsonBodySchema = z.object({
   blobs: z.array(blobRefSchema).min(1),
   folderId: z.string().optional(),
+  promptTask: z
+    .enum(["diplomatic-transcription", "project-notebook"])
+    .optional(),
 });
 
 export async function POST(request: Request) {
@@ -31,63 +45,113 @@ export async function POST(request: Request) {
           { status: 400 },
         );
       }
-      const folderId =
-        parsed.data.folderId && parsed.data.folderId.trim() !== ""
-          ? parsed.data.folderId
-          : undefined;
-
-      const job = createManualIngestJob({
-        kind: "blob",
-        blobs: parsed.data.blobs,
+      const folderId = sanitizeFolderId(parsed.data.folderId);
+      const snapshot = await scheduleBatchIngest(
+        parsed.data.blobs,
         folderId,
-      });
-      return NextResponse.json(job, { status: 202 });
+        parsed.data.promptTask,
+      );
+      return NextResponse.json(snapshot, { status: 202 });
     }
 
     const formData = await request.formData();
-    const files: UploadFileLike[] = formData
-      .getAll("files")
-      .flatMap((entry) => {
-        const file = toUploadFileLike(entry);
-        return file ? [file] : [];
-      });
-    const rawFolderId = formData.get("folderId");
-    const folderId =
-      typeof rawFolderId === "string" && rawFolderId.trim() !== ""
-        ? rawFolderId
-        : undefined;
-
-    const job = createManualIngestJob({
-      kind: "files",
-      files,
-      folderId,
-    });
-    return NextResponse.json(job, { status: 202 });
+    const folderId = sanitizeFolderId(
+      typeof formData.get("folderId") === "string"
+        ? (formData.get("folderId") as string)
+        : undefined,
+    );
+    const promptTask = parsePromptTask(formData.get("promptTask"));
+    const blobs = await uploadFormDataFilesToBlob(formData);
+    if (blobs.length === 0) {
+      return NextResponse.json(
+        { error: "Upload at least one file using the files field." },
+        { status: 400 },
+      );
+    }
+    const snapshot = await scheduleBatchIngest(blobs, folderId, promptTask);
+    return NextResponse.json(snapshot, { status: 202 });
   } catch (error) {
     const response = toErrorResponse(error);
     return NextResponse.json(response.body, { status: response.status });
   }
 }
 
-function toUploadFileLike(entry: FormDataEntryValue): UploadFileLike | null {
-  if (
+async function scheduleBatchIngest(
+  blobs: BlobRef[],
+  folderId: string | undefined,
+  promptTask: "diplomatic-transcription" | "project-notebook" | undefined,
+): Promise<IngestJobSnapshot> {
+  const batchId = `manual-${crypto.randomUUID()}`;
+  const now = new Date().toISOString();
+  const snapshot: IngestJobSnapshot = {
+    batchId,
+    status: "queued",
+    folderId,
+    totalFiles: blobs.length,
+    completedFiles: 0,
+    failedFiles: 0,
+    createdAt: now,
+    updatedAt: now,
+    perFile: newPerFile(
+      blobs.map((blob) => ({ name: blob.name, size: blob.size })),
+    ).map((entry) => ({ ...entry, stage: "uploaded" })),
+  };
+  await getIngestJobStore().write(snapshot);
+
+  const run = await start(batchIngestWorkflow, [
+    { batchId, folderId, blobs, promptTask },
+  ]);
+  await getIngestJobStore().patch(batchId, (current) => ({
+    ...current,
+    runId: run.runId,
+  }));
+  return { ...snapshot, runId: run.runId };
+}
+
+function parsePromptTask(
+  value: FormDataEntryValue | null,
+): "diplomatic-transcription" | "project-notebook" | undefined {
+  if (value === "project-notebook" || value === "diplomatic-transcription") {
+    return value;
+  }
+  return undefined;
+}
+
+async function uploadFormDataFilesToBlob(formData: FormData): Promise<BlobRef[]> {
+  const blobs: BlobRef[] = [];
+  for (const entry of formData.getAll("files")) {
+    if (!isFile(entry)) continue;
+    const uploaded = await put(`manual-ingest/${entry.name}`, entry, {
+      access: "public",
+      addRandomSuffix: true,
+    });
+    blobs.push({
+      url: uploaded.url,
+      name: entry.name,
+      size: entry.size,
+      contentType: entry.type || "application/octet-stream",
+    });
+  }
+  return blobs;
+}
+
+function isFile(entry: FormDataEntryValue): entry is File {
+  return (
     typeof entry === "object" &&
     entry !== null &&
     "arrayBuffer" in entry &&
     typeof entry.arrayBuffer === "function" &&
     "name" in entry &&
-    typeof entry.name === "string" &&
+    typeof (entry as File).name === "string" &&
     "size" in entry &&
-    typeof entry.size === "number" &&
+    typeof (entry as File).size === "number" &&
     "type" in entry &&
-    typeof entry.type === "string"
-  ) {
-    return {
-      name: entry.name,
-      size: entry.size,
-      type: entry.type,
-      arrayBuffer: () => entry.arrayBuffer(),
-    };
-  }
-  return null;
+    typeof (entry as File).type === "string"
+  );
+}
+
+function sanitizeFolderId(value: string | undefined): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
 }

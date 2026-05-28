@@ -1,11 +1,5 @@
 import { AppError } from "./app-error";
 import { createDocumentPackage } from "./extraction";
-import {
-  buildAgentImprovementScript,
-  buildPromptRevisionCandidate,
-  suggestConfidenceCalibrations,
-  summarizeFeedback,
-} from "./feedback-engine";
 import { buildOmekaCsv, buildOmekaCsvRow } from "./omeka-export";
 import { getActivePrompt } from "./prompts";
 import type { EdisonRepository } from "./repositories";
@@ -16,14 +10,9 @@ import {
   transcribeDocument,
 } from "./transcribe";
 import type {
-  AgentFeedback,
-  BoxUpload,
   ConfidenceBucket,
   DocumentPackage,
-  FeedbackTarget,
   MetadataExtraction,
-  PromptVersion,
-  ReviewDecision,
   SourceFile,
   TranscriptionRun,
 } from "./types";
@@ -71,29 +60,6 @@ export interface BatchExportPayload {
   packages: DocumentPackage[];
   transcriptions: TranscriptionRun[];
   metadata: MetadataExtraction[];
-}
-
-export interface BoxWebhookEvent {
-  id: string;
-  trigger: string;
-  source: {
-    id: string;
-    type: string;
-    name?: string;
-    size?: number;
-    sha1?: string;
-    parent?: {
-      id: string;
-      name: string;
-    };
-    path_collection?: {
-      entries?: Array<{
-        id: string;
-        name: string;
-        type?: string;
-      }>;
-    };
-  };
 }
 
 export interface ProcessSourceFileInput {
@@ -236,15 +202,17 @@ export async function processSourceFile(
 export class EdisonAutomationService {
   constructor(private readonly repository: EdisonRepository) {}
 
+  getRepository(): EdisonRepository {
+    return this.repository;
+  }
+
   async getDashboard() {
     const documents = await this.repository.listDocuments();
-    const boxUploads = await this.repository.listBoxUploads();
     const reviewCase = await this.repository.getReviewCase();
 
     return {
-      summary: summarizeDocuments(documents, boxUploads),
+      summary: summarizeDocuments(documents),
       documents,
-      boxUploads,
       reviewCase,
     };
   }
@@ -290,7 +258,6 @@ export class EdisonAutomationService {
 
       if (aiGatewayConfigured && isTranscribableMediaType(sourceFile.mimeType)) {
         try {
-          const startedAt = Date.now();
           input.onProgress?.({
             fileName: sourceFile.name,
             stage: "transcribing",
@@ -305,7 +272,6 @@ export class EdisonAutomationService {
           transcribeModel = transcribed.model;
           transcribeInputTokens = transcribed.inputTokens;
           transcribeOutputTokens = transcribed.outputTokens;
-          logIngestStep("transcription", sourceFile.name, startedAt);
         } catch (error) {
           transcriptionErrors.push({
             fileName: sourceFile.name,
@@ -335,7 +301,6 @@ export class EdisonAutomationService {
       let documentMetadata: MetadataExtraction = processed.metadata;
       if (aiGatewayConfigured && rawOcrText && rawOcrText.trim().length > 0) {
         try {
-          const startedAt = Date.now();
           input.onProgress?.({
             fileName: sourceFile.name,
             stage: "metadata",
@@ -350,7 +315,6 @@ export class EdisonAutomationService {
             confidence: processed.confidence,
           });
           documentMetadata = indexed.metadata;
-          logIngestStep("metadata", sourceFile.name, startedAt);
         } catch (error) {
           transcriptionErrors.push({
             fileName: sourceFile.name,
@@ -386,105 +350,6 @@ export class EdisonAutomationService {
 
     await this.repository.saveProcessedDocuments(packages, transcriptions, metadata);
     return { packages, transcriptions, metadata, transcriptionErrors };
-  }
-
-  async handleBoxWebhook(event: BoxWebhookEvent) {
-    if (event.trigger !== "FILE.UPLOADED") {
-      return {
-        accepted: true,
-        recorded: false,
-        queued: false,
-        reason: `Ignored unsupported trigger ${event.trigger}.`,
-      };
-    }
-
-    const now = new Date().toISOString();
-    const pathEntries = event.source.path_collection?.entries ?? [];
-    const parent = event.source.parent ?? pathEntries.at(-1);
-    const folderName = parent?.name ?? "Unassigned Box folder";
-    const folderPath =
-      pathEntries.length > 0
-        ? pathEntries.map((entry) => entry.name).concat(folderName).join(" / ")
-        : folderName;
-    const upload: BoxUpload = {
-      id: `box-upload-${event.source.id}`,
-      webhookEventId: event.id,
-      boxFileId: event.source.id,
-      fileName: event.source.name ?? "Unknown",
-      fileSize: event.source.size,
-      checksum: event.source.sha1,
-      folderId: parent?.id,
-      folderName,
-      folderPath,
-      status: "available",
-      receivedAt: now,
-      updatedAt: now,
-    };
-
-    await this.repository.saveBoxUpload(upload);
-
-    return {
-      accepted: true,
-      recorded: true,
-      queued: false,
-      upload,
-      nextAction: "User must click Start transcription in the platform.",
-    };
-  }
-
-  async startTranscriptionForBoxUpload(uploadId: string) {
-    const upload = await this.repository.getBoxUpload(uploadId);
-    if (!upload) {
-      throw new AppError("NOT_FOUND", "Box upload was not found.", 404);
-    }
-
-    if (upload.status !== "available" && upload.status !== "selected_for_transcription") {
-      throw new AppError(
-        "BAD_REQUEST",
-        `Box upload cannot be started from status ${upload.status}.`,
-        409,
-      );
-    }
-
-    const updated: BoxUpload = {
-      ...upload,
-      status: "queued_for_pipeline",
-      updatedAt: new Date().toISOString(),
-    };
-    await this.repository.updateBoxUpload(updated);
-
-    return {
-      accepted: true,
-      upload: updated,
-      pendingSteps: ["fetch-from-box-bytes", "run-pipeline"],
-      note:
-        "Byte fetch is performed by a Box worker; the unified pipeline runs once bytes are available.",
-    };
-  }
-
-  async buildBatchExport(documentIds: string[]): Promise<{
-    bytes: Uint8Array;
-    fileName: string;
-    documentCount: number;
-  }> {
-    if (documentIds.length === 0) {
-      throw new AppError(
-        "BAD_REQUEST",
-        "Provide at least one documentId to export.",
-        400,
-      );
-    }
-
-    const rows = await this.repository.listExportRowsByIds(documentIds);
-    if (rows.length === 0) {
-      throw new AppError(
-        "NOT_FOUND",
-        "No documents found for the requested ids.",
-        404,
-      );
-    }
-
-    return buildBatchZip(rows);
   }
 
   async buildBatchExportFromPayload(
@@ -531,106 +396,6 @@ export class EdisonAutomationService {
       rows.map((row) => buildOmekaCsvRow(row.metadata, row.transcription)),
     );
   }
-
-  async recordReviewAction(input: {
-    documentId: string;
-    reviewer: string;
-    decision: ReviewDecision;
-    note: string;
-  }) {
-    await this.repository.appendReviewEvent({
-      id: crypto.randomUUID(),
-      documentId: input.documentId,
-      reviewer: input.reviewer,
-      decision: input.decision,
-      note: input.note,
-      createdAt: new Date().toISOString(),
-    });
-  }
-
-  async recordAgentFeedback(input: {
-    documentId: string;
-    reviewer: string;
-    target: FeedbackTarget;
-    originalValue: string;
-    correctedValue: string;
-    issueTags: string[];
-    promptVersion?: string;
-    model?: string;
-    confidenceBefore?: AgentFeedback["confidenceBefore"];
-    confidenceAfter?: AgentFeedback["confidenceAfter"];
-  }): Promise<AgentFeedback> {
-    if (input.originalValue.trim() === input.correctedValue.trim()) {
-      throw new AppError(
-        "BAD_REQUEST",
-        "Feedback must include a meaningful correction.",
-        400,
-      );
-    }
-
-    const feedback: AgentFeedback = {
-      id: crypto.randomUUID(),
-      documentId: input.documentId,
-      reviewer: input.reviewer,
-      target: input.target,
-      originalValue: input.originalValue,
-      correctedValue: input.correctedValue,
-      issueTags: [...new Set(input.issueTags.map((tag) => tag.trim()).filter(Boolean))],
-      promptVersion: input.promptVersion,
-      model: input.model,
-      confidenceBefore: input.confidenceBefore,
-      confidenceAfter: input.confidenceAfter,
-      createdAt: new Date().toISOString(),
-    };
-
-    await this.repository.appendAgentFeedback(feedback);
-    return feedback;
-  }
-
-  async previewAgentImprovementDraft(task: PromptVersion["task"]) {
-    return this.buildAgentImprovementDraft(task, { persist: false });
-  }
-
-  async generateAgentImprovementDraft(task: PromptVersion["task"]) {
-    return this.buildAgentImprovementDraft(task, { persist: true });
-  }
-
-  private async buildAgentImprovementDraft(
-    task: PromptVersion["task"],
-    options: { persist: boolean },
-  ) {
-    const allFeedback = await this.repository.listAgentFeedback();
-    const promptFeedback = allFeedback.filter(
-      (item) => item.target === "prompt" || item.target === "transcription",
-    );
-    const activePrompt = getActivePrompt(task);
-    const candidate = buildPromptRevisionCandidate({
-      task,
-      basePromptVersion: activePrompt.version,
-      basePrompt: activePrompt.prompt,
-      feedback: promptFeedback,
-    });
-    const calibrations = suggestConfidenceCalibrations(allFeedback);
-
-    if (options.persist) {
-      await this.repository.savePromptRevisionCandidate(candidate);
-    }
-
-    return {
-      summary: summarizeFeedback(promptFeedback),
-      candidate,
-      calibrations,
-      agentScript: buildAgentImprovementScript({ candidate, calibrations }),
-    };
-  }
-}
-
-function logIngestStep(stage: string, fileName: string, startedAt: number) {
-  console.info("[manual-ingest]", {
-    stage,
-    fileName,
-    elapsedMs: Date.now() - startedAt,
-  });
 }
 
 async function buildBatchZip(rows: BatchExportRow[]): Promise<{

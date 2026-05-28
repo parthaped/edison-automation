@@ -5,7 +5,6 @@ import { ReviewerWorkbench } from "./reviewer-workbench";
 import {
   sampleDocuments,
   sampleMetadata,
-  sampleReviewEvents,
   sampleTranscription,
 } from "@/lib/edison/sample-data";
 
@@ -16,7 +15,6 @@ describe("ReviewerWorkbench", () => {
         documents={[sampleDocuments[0]]}
         transcription={sampleTranscription}
         metadata={sampleMetadata}
-        reviewEvents={sampleReviewEvents}
       />,
     );
 
@@ -34,7 +32,6 @@ describe("ReviewerWorkbench", () => {
         documents={[sampleDocuments[0]]}
         transcription={sampleTranscription}
         metadata={sampleMetadata}
-        reviewEvents={sampleReviewEvents}
       />,
     );
 
@@ -51,27 +48,22 @@ describe("ReviewerWorkbench", () => {
         documents={[sampleDocuments[2]]}
         transcription={sampleTranscription}
         metadata={sampleMetadata}
-        reviewEvents={sampleReviewEvents}
       />,
     );
 
     expect(screen.getByText("No extracted pages available.")).toBeInTheDocument();
   });
 
-  it("exposes a link to the standalone embeddable viewer", () => {
+  it("exposes a link to the standalone viewer", () => {
     render(
       <ReviewerWorkbench
         documents={[sampleDocuments[0]]}
         transcription={sampleTranscription}
         metadata={sampleMetadata}
-        reviewEvents={sampleReviewEvents}
       />,
     );
 
     const link = screen.getByRole("link", { name: /open standalone/i });
-    expect(link).toHaveAttribute(
-      "href",
-      "/viewer/D9032-00001?panel=both",
-    );
+    expect(link).toHaveAttribute("href", "/viewer/D9032-00001");
   });
 });

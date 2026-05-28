@@ -1,30 +1,11 @@
 import type {
-  BoxUpload,
   DocumentPackage,
   MetadataExtraction,
-  ReviewEvent,
   TranscriptionRun,
 } from "./types";
 
 // Development seed data only. Runtime code should access records through the
 // EdisonRepository interface so this can be replaced by Postgres/object storage.
-export const sampleBoxUploads: BoxUpload[] = [
-  {
-    id: "box-upload-987654321",
-    webhookEventId: "box-event-1",
-    boxFileId: "987654321",
-    fileName: "D9032-00002.pdf",
-    fileSize: 4_720_000,
-    checksum: "sample-sha1",
-    folderId: "box-folder-D9032",
-    folderName: "D9032-F Electric Light Philadelphia",
-    folderPath: "Thomas Edison Papers / Incoming / D9032-F Electric Light Philadelphia",
-    status: "available",
-    receivedAt: "2026-05-27T13:45:00.000Z",
-    updatedAt: "2026-05-27T13:45:00.000Z",
-  },
-];
-
 export const sampleDocuments: DocumentPackage[] = [
   {
     id: "D9032-00001",
@@ -32,11 +13,10 @@ export const sampleDocuments: DocumentPackage[] = [
     documentId: "D9032-00001",
     title: "[D9032-00001], Electric Light correspondence",
     sourceFile: {
-      id: "box-file-1",
+      id: "seed-file-1",
       name: "D9032-00001.pdf",
       size: 184_000,
       mimeType: "application/pdf",
-      boxFileId: "123456789",
     },
     pages: [
       {
@@ -71,7 +51,7 @@ export const sampleDocuments: DocumentPackage[] = [
     documentId: "N042-00002",
     title: "[N042-00002], Notebook page with project list",
     sourceFile: {
-      id: "box-file-2",
+      id: "seed-file-2",
       name: "notebook-page.tif",
       size: 21_900_000,
       mimeType: "image/tiff",
@@ -98,7 +78,7 @@ export const sampleDocuments: DocumentPackage[] = [
     documentId: "NEW-D8501-00003",
     title: "[NEW-D8501-00003], blocked upload",
     sourceFile: {
-      id: "box-file-3",
+      id: "seed-file-3",
       name: "unknown-archive.bin",
       size: 7000,
       mimeType: "application/octet-stream",
@@ -140,14 +120,3 @@ export const sampleMetadata: MetadataExtraction = {
   imageNames: ["D9032-00001/d9032-00001_0001.jpg", "D9032-00001/d9032-00001_0002.jpg"],
   confidence: "medium",
 };
-
-export const sampleReviewEvents: ReviewEvent[] = [
-  {
-    id: "review-1",
-    documentId: "D9032-00001",
-    reviewer: "Archivist",
-    decision: "marked_uncertain",
-    note: "Marked filament reading for human verification.",
-    createdAt: "2026-05-27T12:21:00.000Z",
-  },
-];

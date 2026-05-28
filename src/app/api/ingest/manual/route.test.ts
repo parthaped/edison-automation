@@ -1,37 +1,43 @@
-import { PDFDocument } from "pdf-lib";
-import { describe, expect, it } from "vitest";
-import { GET } from "./[batchId]/route";
+import { describe, expect, it, vi } from "vitest";
 import { POST } from "./route";
 
-describe("manual ingest route", () => {
-  it("creates a background batch for direct uploads and exposes its status", async () => {
-    const formData = new FormData();
-    formData.append(
-      "files",
-      new File([await makePdfBytes()], "D9032-00001.pdf", {
-        type: "application/pdf",
-      }),
-    );
-    formData.append("folderId", "D9032-F");
+vi.mock("workflow/api", () => ({
+  start: vi.fn(async () => ({ runId: "run-test" })),
+}));
 
+vi.mock("@vercel/blob", () => ({
+  put: vi.fn(),
+  del: vi.fn(),
+}));
+
+describe("POST /api/ingest/manual", () => {
+  it("accepts a JSON blob payload and returns a queued batch", async () => {
     const response = await POST(
       new Request("https://example.test/api/ingest/manual", {
         method: "POST",
-        body: formData,
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          folderId: "D9032-F",
+          blobs: [
+            {
+              url: "https://blob.example/D9032-00001.pdf",
+              name: "D9032-00001.pdf",
+              size: 1234,
+              contentType: "application/pdf",
+            },
+          ],
+        }),
       }),
     );
-    const created = await response.json();
-
     expect(response.status).toBe(202);
-    expect(created.batchId).toMatch(/^manual-/);
-    expect(created.status).toBe("queued");
-
-    const completed = await waitForJob(created.batchId);
-    expect(completed.status).toBe("completed");
-    expect(completed.result.packages[0].documentId).toMatch(/D9032-00001$/);
+    const body = await response.json();
+    expect(body.batchId).toMatch(/^manual-/);
+    expect(body.status).toBe("queued");
+    expect(body.totalFiles).toBe(1);
+    expect(body.perFile).toHaveLength(1);
   });
 
-  it("rejects invalid JSON blob payloads synchronously", async () => {
+  it("rejects invalid JSON blob payloads with a 400", async () => {
     const response = await POST(
       new Request("https://example.test/api/ingest/manual", {
         method: "POST",
@@ -45,28 +51,3 @@ describe("manual ingest route", () => {
     expect(body.error).toBe("Invalid ingest payload.");
   });
 });
-
-async function waitForJob(batchId: string) {
-  for (let attempt = 0; attempt < 20; attempt += 1) {
-    const response = await GET(new Request(`https://example.test/${batchId}`), {
-      params: Promise.resolve({ batchId }),
-    });
-    const body = await response.json();
-    if (body.status === "completed" || body.status === "failed") {
-      return body;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
-  throw new Error(`Timed out waiting for ${batchId}`);
-}
-
-async function makePdfBytes(): Promise<ArrayBuffer> {
-  const pdf = await PDFDocument.create();
-  pdf.addPage([200, 200]);
-  const bytes = await pdf.save();
-  return bytes.buffer.slice(
-    bytes.byteOffset,
-    bytes.byteOffset + bytes.byteLength,
-  ) as ArrayBuffer;
-}
-

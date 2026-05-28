@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { UploadBatchForm } from "./upload-batch-form";
 import { MAX_UPLOAD_BYTES } from "@/lib/edison/upload-constraints";
-import type { ManualIngestJobSnapshot } from "@/lib/edison/manual-ingest-jobs";
+import type { IngestJobSnapshot } from "@/lib/edison/ingest-job-store";
 import type { ManualIngestResult } from "@/lib/edison/service";
 
 vi.mock("@vercel/blob/client", () => ({
@@ -44,11 +44,10 @@ describe("UploadBatchForm", () => {
   it("uses single-part Blob upload for small files", async () => {
     const user = userEvent.setup();
     const file = new File(["pdf"], "D9032-00001.pdf", { type: "application/pdf" });
-    const job = makeJob({ status: "queued", stage: "queued" });
+    const job = makeJob({ status: "queued" });
     const completedJob = makeJob({
       status: "completed",
-      stage: "completed",
-      processedFiles: 1,
+      completedFiles: 1,
       result: makeResult(),
     });
     const fetchMock = vi
@@ -132,17 +131,21 @@ function jsonResponse(body: unknown, status: number) {
   return new Response(JSON.stringify(body), { status });
 }
 
-function makeJob(
-  overrides: Partial<ManualIngestJobSnapshot>,
-): ManualIngestJobSnapshot {
+function makeJob(overrides: Partial<IngestJobSnapshot>): IngestJobSnapshot {
   return {
     batchId: "manual-test",
     status: "queued",
-    stage: "queued",
     totalFiles: 1,
-    processedFiles: 0,
+    completedFiles: 0,
+    failedFiles: 0,
     createdAt: "2026-05-27T00:00:00.000Z",
     updatedAt: "2026-05-27T00:00:00.000Z",
+    perFile: [
+      {
+        fileName: "D9032-00001.pdf",
+        stage: "uploaded",
+      },
+    ],
     ...overrides,
   };
 }
@@ -185,4 +188,3 @@ function makeResult(): ManualIngestResult {
     transcriptionErrors: [],
   };
 }
-

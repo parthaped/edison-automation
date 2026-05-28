@@ -136,7 +136,6 @@ export default async function Home() {
               documents={reviewCase.documents}
               transcription={reviewCase.transcription}
               metadata={reviewCase.metadata}
-              reviewEvents={reviewCase.reviewEvents}
             />
           ) : (
             <div className="border border-dashed border-border bg-card px-6 py-14 text-center">

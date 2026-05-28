@@ -59,7 +59,7 @@ export default function UploadPage() {
           <PipelineStep
             n={1}
             title="Transcribe"
-            body="Each file is sent to Gemini Flash-Lite via the Vercel AI Gateway. PDFs are read whole; images are sent as a vision message."
+            body="Each file is sent through the Vercel AI Gateway. PDFs are read whole; images are sent as a vision message. Project notebooks use a dedicated table-formatting prompt."
           />
           <PipelineStep
             n={2}
@@ -72,6 +72,21 @@ export default function UploadPage() {
             body="The batch result is bundled into a ZIP folder with per-document transcription, metadata JSON, a manifest, and an Omeka CSV."
           />
         </section>
+
+        <aside className="mt-4 border border-border bg-muted/30 px-4 py-3 text-[13px] text-muted-foreground">
+          Need image-file lists from{" "}
+          <span className="font-semibold text-foreground">
+            edisondigital.rutgers.edu
+          </span>
+          ? Follow the{" "}
+          <Link
+            href="/docs/operator/edison-digital-image-lists"
+            className="font-medium text-foreground underline hover:no-underline"
+          >
+            Omeka CSV &rarr; Gemini split guide
+          </Link>{" "}
+          before uploading.
+        </aside>
 
         <section className="mt-6" aria-label="Upload form">
           <UploadBatchForm blobReady={blobReady} />

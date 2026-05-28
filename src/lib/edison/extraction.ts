@@ -64,7 +64,7 @@ export async function createExtractionPlan(
 
   return {
     kind: validation.kind,
-    pageCount: validation.kind === "csv" || validation.kind === "docx" ? 0 : 1,
+    pageCount: 1,
     warnings: validation.warnings,
   };
 }

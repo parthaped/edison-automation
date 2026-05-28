@@ -1,34 +1,23 @@
-import {
-  sampleBoxUploads,
-  sampleDocuments,
-  sampleMetadata,
-  sampleReviewEvents,
-  sampleTranscription,
-} from "./sample-data";
+import { sampleDocuments, sampleMetadata, sampleTranscription } from "./sample-data";
 import type { EdisonRepository, ReviewCase } from "./repositories";
 import type {
-  AgentFeedback,
-  BoxUpload,
   DocumentPackage,
   MetadataExtraction,
-  PromptRevisionCandidate,
-  ReviewEvent,
   TranscriptionRun,
 } from "./types";
 
 export class InMemoryEdisonRepository implements EdisonRepository {
-  private boxUploads = new Map<string, BoxUpload>();
-  private boxFileIdIndex = new Map<string, string>();
   private documents = new Map<string, DocumentPackage>();
   private transcriptions = new Map<string, TranscriptionRun>();
   private metadata = new Map<string, MetadataExtraction>();
-  private reviewEvents: ReviewEvent[] = [];
-  private agentFeedback: AgentFeedback[] = [];
-  private promptRevisionCandidates: PromptRevisionCandidate[] = [];
 
   constructor(seed = true) {
     if (seed) {
-      this.saveSeedData();
+      for (const document of sampleDocuments) {
+        this.documents.set(document.documentId, document);
+      }
+      this.transcriptions.set(sampleTranscription.documentId, sampleTranscription);
+      this.metadata.set(sampleMetadata.documentId, sampleMetadata);
     }
   }
 
@@ -36,41 +25,6 @@ export class InMemoryEdisonRepository implements EdisonRepository {
     return [...this.documents.values()].sort((a, b) =>
       a.updatedAt < b.updatedAt ? 1 : -1,
     );
-  }
-
-  async listBoxUploads(): Promise<BoxUpload[]> {
-    return [...this.boxUploads.values()].sort((a, b) =>
-      a.receivedAt < b.receivedAt ? 1 : -1,
-    );
-  }
-
-  async saveBoxUpload(upload: BoxUpload): Promise<void> {
-    const existingId = this.boxFileIdIndex.get(upload.boxFileId);
-    if (existingId) {
-      const existing = this.boxUploads.get(existingId);
-      if (existing) {
-        this.boxUploads.set(existingId, {
-          ...existing,
-          ...upload,
-          id: existing.id,
-          receivedAt: existing.receivedAt,
-          updatedAt: upload.updatedAt,
-        });
-        return;
-      }
-    }
-
-    this.boxUploads.set(upload.id, upload);
-    this.boxFileIdIndex.set(upload.boxFileId, upload.id);
-  }
-
-  async updateBoxUpload(upload: BoxUpload): Promise<void> {
-    this.boxUploads.set(upload.id, upload);
-    this.boxFileIdIndex.set(upload.boxFileId, upload.id);
-  }
-
-  async getBoxUpload(id: string): Promise<BoxUpload | null> {
-    return this.boxUploads.get(id) ?? null;
   }
 
   async saveDocuments(documents: DocumentPackage[]): Promise<void> {
@@ -101,6 +55,16 @@ export class InMemoryEdisonRepository implements EdisonRepository {
     }
   }
 
+  async saveProcessedDocument(
+    document: DocumentPackage,
+    transcription: TranscriptionRun,
+    metadata: MetadataExtraction,
+  ): Promise<void> {
+    this.documents.set(document.documentId, document);
+    this.transcriptions.set(transcription.documentId, transcription);
+    this.metadata.set(metadata.documentId, metadata);
+  }
+
   async getReviewCase(documentId?: string): Promise<ReviewCase | null> {
     const documents = await this.listDocuments();
     if (documents.length === 0) return null;
@@ -118,9 +82,6 @@ export class InMemoryEdisonRepository implements EdisonRepository {
       transcription:
         this.transcriptions.get(selected.documentId) ?? emptyTranscription(selected.documentId),
       metadata: this.metadata.get(selected.documentId) ?? emptyMetadata(selected),
-      reviewEvents: this.reviewEvents.filter(
-        (event) => event.documentId === selected.documentId,
-      ),
     };
   }
 
@@ -154,43 +115,6 @@ export class InMemoryEdisonRepository implements EdisonRepository {
       });
     }
     return rows;
-  }
-
-  async appendReviewEvent(event: ReviewEvent): Promise<void> {
-    this.reviewEvents.push(event);
-  }
-
-  async appendAgentFeedback(feedback: AgentFeedback): Promise<void> {
-    this.agentFeedback.push(feedback);
-  }
-
-  async listAgentFeedback(): Promise<AgentFeedback[]> {
-    return [...this.agentFeedback].sort((a, b) =>
-      a.createdAt < b.createdAt ? 1 : -1,
-    );
-  }
-
-  async savePromptRevisionCandidate(candidate: PromptRevisionCandidate): Promise<void> {
-    this.promptRevisionCandidates.push(candidate);
-  }
-
-  async listPromptRevisionCandidates(): Promise<PromptRevisionCandidate[]> {
-    return [...this.promptRevisionCandidates].sort((a, b) =>
-      a.createdAt < b.createdAt ? 1 : -1,
-    );
-  }
-
-  private saveSeedData() {
-    for (const upload of sampleBoxUploads) {
-      this.boxUploads.set(upload.id, upload);
-      this.boxFileIdIndex.set(upload.boxFileId, upload.id);
-    }
-    for (const document of sampleDocuments) {
-      this.documents.set(document.documentId, document);
-    }
-    this.transcriptions.set(sampleTranscription.documentId, sampleTranscription);
-    this.metadata.set(sampleMetadata.documentId, sampleMetadata);
-    this.reviewEvents = [...sampleReviewEvents];
   }
 }
 

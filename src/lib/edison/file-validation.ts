@@ -12,8 +12,6 @@ const EXTENSION_TO_KIND: Record<string, SupportedFileKind> = {
   tiff: "tiff",
   webp: "webp",
   gif: "gif",
-  docx: "docx",
-  csv: "csv",
 };
 
 const MIME_TO_KIND: Record<string, SupportedFileKind> = {
@@ -23,10 +21,6 @@ const MIME_TO_KIND: Record<string, SupportedFileKind> = {
   "image/tiff": "tiff",
   "image/webp": "webp",
   "image/gif": "gif",
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
-    "docx",
-  "text/csv": "csv",
-  "application/csv": "csv",
 };
 
 export interface FileValidationInput {
@@ -65,7 +59,6 @@ export function detectKindFromMagic(bytes?: Uint8Array): SupportedFileKind | und
   if (ascii.startsWith("GIF87a") || ascii.startsWith("GIF89a")) return "gif";
   if (ascii.startsWith("II*\u0000") || ascii.startsWith("MM\u0000*")) return "tiff";
   if (ascii.startsWith("RIFF") && ascii.slice(8, 12) === "WEBP") return "webp";
-  if (firstBytes[0] === 0x50 && firstBytes[1] === 0x4b) return "docx";
 
   return undefined;
 }

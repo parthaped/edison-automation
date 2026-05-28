@@ -4,9 +4,7 @@ export type SupportedFileKind =
   | "png"
   | "tiff"
   | "webp"
-  | "gif"
-  | "docx"
-  | "csv";
+  | "gif";
 
 export type ConfidenceBucket = "high" | "medium" | "low" | "blocked";
 
@@ -19,45 +17,12 @@ export type ProcessingStatus =
   | "exported"
   | "blocked";
 
-export type BoxUploadStatus =
-  | "available"
-  | "selected_for_transcription"
-  | "queued_for_pipeline"
-  | "imported"
-  | "ignored";
-
-export type ReviewDecision =
-  | "edited_transcription"
-  | "marked_uncertain"
-  | "corrected_metadata"
-  | "split_pages"
-  | "merged_pages"
-  | "flagged_manual_review"
-  | "approved"
-  | "rejected";
-
 export interface SourceFile {
   id: string;
   name: string;
   size: number;
   mimeType: string;
-  boxFileId?: string;
   checksum?: string;
-}
-
-export interface BoxUpload {
-  id: string;
-  webhookEventId: string;
-  boxFileId: string;
-  fileName: string;
-  fileSize?: number;
-  checksum?: string;
-  folderId?: string;
-  folderName: string;
-  folderPath: string;
-  status: BoxUploadStatus;
-  receivedAt: string;
-  updatedAt: string;
 }
 
 export interface ValidationResult {
@@ -76,7 +41,6 @@ export interface PageImage {
   checksum?: string;
   width?: number;
   height?: number;
-  omekaMediaId?: number;
   originalUrl?: string;
 }
 
@@ -122,65 +86,9 @@ export interface MetadataExtraction {
   confidence: ConfidenceBucket;
 }
 
-export interface ReviewEvent {
-  id: string;
-  documentId: string;
-  reviewer: string;
-  decision: ReviewDecision;
-  note: string;
-  createdAt: string;
-}
-
-export type FeedbackTarget =
-  | "transcription"
-  | "metadata"
-  | "confidence"
-  | "file-extraction"
-  | "prompt";
-
-export interface AgentFeedback {
-  id: string;
-  documentId: string;
-  reviewer: string;
-  target: FeedbackTarget;
-  promptVersion?: string;
-  model?: string;
-  originalValue: string;
-  correctedValue: string;
-  issueTags: string[];
-  confidenceBefore?: ConfidenceBucket;
-  confidenceAfter?: ConfidenceBucket;
-  createdAt: string;
-}
-
-export interface PromptRevisionCandidate {
-  id: string;
-  task: PromptVersion["task"];
-  basePromptVersion: string;
-  proposedPrompt: string;
-  rationale: string;
-  supportingFeedbackIds: string[];
-  status: "draft" | "approved" | "rejected";
-  createdAt: string;
-}
-
-export interface ConfidenceCalibrationSuggestion {
-  id: string;
-  reason: string;
-  suggestedBucket: ConfidenceBucket;
-  supportingFeedbackIds: string[];
-  createdAt: string;
-}
-
 export interface PromptVersion {
   id: string;
-  task:
-    | "ocr-cleanup"
-    | "diplomatic-transcription"
-    | "normalized-transcription"
-    | "metadata-extraction"
-    | "summary"
-    | "consensus";
+  task: "diplomatic-transcription" | "metadata-extraction" | "project-notebook";
   version: string;
   prompt: string;
   active: boolean;

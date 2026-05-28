@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
-import { toErrorResponse } from "@/lib/edison/app-error";
-import { getManualIngestJob } from "@/lib/edison/manual-ingest-jobs";
+import { AppError, toErrorResponse } from "@/lib/edison/app-error";
+import { getIngestJobStore } from "@/lib/edison/ingest-job-store";
 
 export const runtime = "nodejs";
+export const maxDuration = 30;
 
 export async function GET(
   _request: Request,
@@ -10,10 +11,17 @@ export async function GET(
 ) {
   try {
     const { batchId } = await context.params;
-    return NextResponse.json(getManualIngestJob(batchId));
+    const snapshot = await getIngestJobStore().read(batchId);
+    if (!snapshot) {
+      throw new AppError(
+        "NOT_FOUND",
+        "Manual ingest batch was not found.",
+        404,
+      );
+    }
+    return NextResponse.json(snapshot);
   } catch (error) {
     const response = toErrorResponse(error);
     return NextResponse.json(response.body, { status: response.status });
   }
 }
-

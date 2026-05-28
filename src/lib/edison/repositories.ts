@@ -1,10 +1,6 @@
 import type {
-  AgentFeedback,
-  BoxUpload,
   DocumentPackage,
   MetadataExtraction,
-  PromptRevisionCandidate,
-  ReviewEvent,
   TranscriptionRun,
 } from "./types";
 
@@ -14,14 +10,12 @@ export interface DashboardSummary {
   mediumConfidence: number;
   blocked: number;
   readyToExport: number;
-  pendingBoxUploads: number;
 }
 
 export interface ReviewCase {
   documents: DocumentPackage[];
   transcription: TranscriptionRun;
   metadata: MetadataExtraction;
-  reviewEvents: ReviewEvent[];
 }
 
 export interface EdisonRepository {
@@ -32,10 +26,11 @@ export interface EdisonRepository {
     transcriptions: TranscriptionRun[],
     metadata: MetadataExtraction[],
   ): Promise<void>;
-  listBoxUploads(): Promise<BoxUpload[]>;
-  saveBoxUpload(upload: BoxUpload): Promise<void>;
-  updateBoxUpload(upload: BoxUpload): Promise<void>;
-  getBoxUpload(id: string): Promise<BoxUpload | null>;
+  saveProcessedDocument(
+    document: DocumentPackage,
+    transcription: TranscriptionRun,
+    metadata: MetadataExtraction,
+  ): Promise<void>;
   getReviewCase(documentId?: string): Promise<ReviewCase | null>;
   listApprovedExportRows(): Promise<
     Array<{
@@ -50,16 +45,10 @@ export interface EdisonRepository {
       transcription: TranscriptionRun;
     }>
   >;
-  appendReviewEvent(event: ReviewEvent): Promise<void>;
-  appendAgentFeedback(feedback: AgentFeedback): Promise<void>;
-  listAgentFeedback(): Promise<AgentFeedback[]>;
-  savePromptRevisionCandidate(candidate: PromptRevisionCandidate): Promise<void>;
-  listPromptRevisionCandidates(): Promise<PromptRevisionCandidate[]>;
 }
 
 export function summarizeDocuments(
   documents: DocumentPackage[],
-  boxUploads: BoxUpload[] = [],
 ): DashboardSummary {
   return {
     total: documents.length,
@@ -67,6 +56,5 @@ export function summarizeDocuments(
     mediumConfidence: documents.filter((document) => document.confidence === "medium").length,
     blocked: documents.filter((document) => document.status === "blocked").length,
     readyToExport: documents.filter((document) => document.status === "approved").length,
-    pendingBoxUploads: boxUploads.filter((upload) => upload.status === "available").length,
   };
 }
