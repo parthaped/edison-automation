@@ -21,7 +21,11 @@ const SUPPORTED_PDF_MIME_TYPE = "application/pdf";
 // EDISON_OCR_MODEL and EDISON_METADATA_MODEL environment variables.
 const DEFAULT_OCR_MODEL = "google/gemini-2.5-flash";
 const DEFAULT_METADATA_MODEL = "google/gemini-2.5-flash-lite";
-const DEFAULT_TIMEOUT_MS = 90_000;
+// Must stay below the serverless function ceiling (60s on the Hobby plan) so a
+// slow model call aborts cleanly and is caught as a retryable error instead of
+// the platform killing the whole step mid-request. Override with
+// EDISON_AI_TIMEOUT_MS on plans with a larger maxDuration.
+const DEFAULT_TIMEOUT_MS = 45_000;
 
 export type TranscribableMediaType =
   | "image/jpeg"
