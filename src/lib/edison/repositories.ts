@@ -43,6 +43,13 @@ export interface EdisonRepository {
       transcription: TranscriptionRun;
     }>
   >;
+  listExportRowsByIds(documentIds: string[]): Promise<
+    Array<{
+      document: DocumentPackage;
+      metadata: MetadataExtraction;
+      transcription: TranscriptionRun;
+    }>
+  >;
   appendReviewEvent(event: ReviewEvent): Promise<void>;
   appendAgentFeedback(feedback: AgentFeedback): Promise<void>;
   listAgentFeedback(): Promise<AgentFeedback[]>;

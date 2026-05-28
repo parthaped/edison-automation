@@ -1,7 +1,7 @@
 "use client";
 
-import { motion, type HTMLMotionProps, type Transition } from "motion/react";
-import { Children, type ReactNode } from "react";
+import type { HTMLAttributes, ReactNode } from "react";
+import type { Transition } from "motion/react";
 
 const spring: Transition = {
   type: "spring",
@@ -10,31 +10,23 @@ const spring: Transition = {
   mass: 0.6,
 };
 
-type FadeRiseProps = Omit<HTMLMotionProps<"div">, "initial" | "animate"> & {
+type FadeRiseProps = HTMLAttributes<HTMLDivElement> & {
   delay?: number;
   y?: number;
 };
 
 export function FadeRise({
   children,
-  delay = 0,
-  y = 12,
-  transition,
+  delay: _delay,
+  y: _y,
   ...rest
 }: FadeRiseProps) {
-  return (
-    <motion.div
-      initial={{ opacity: 0, y }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={transition ?? { ...spring, delay }}
-      {...rest}
-    >
-      {children}
-    </motion.div>
-  );
+  void _delay;
+  void _y;
+  return <div {...rest}>{children}</div>;
 }
 
-type StaggerProps = Omit<HTMLMotionProps<"div">, "initial" | "animate" | "variants"> & {
+type StaggerProps = HTMLAttributes<HTMLDivElement> & {
   children: ReactNode;
   staggerChildren?: number;
   delayChildren?: number;
@@ -42,34 +34,13 @@ type StaggerProps = Omit<HTMLMotionProps<"div">, "initial" | "animate" | "varian
 
 export function Stagger({
   children,
-  staggerChildren = 0.06,
-  delayChildren = 0.04,
+  staggerChildren: _staggerChildren,
+  delayChildren: _delayChildren,
   ...rest
 }: StaggerProps) {
-  return (
-    <motion.div
-      initial="hidden"
-      animate="visible"
-      variants={{
-        hidden: {},
-        visible: {
-          transition: { staggerChildren, delayChildren },
-        },
-      }}
-      {...rest}
-    >
-      {Children.map(children, (child) => (
-        <motion.div
-          variants={{
-            hidden: { opacity: 0, y: 12 },
-            visible: { opacity: 1, y: 0, transition: spring },
-          }}
-        >
-          {child}
-        </motion.div>
-      ))}
-    </motion.div>
-  );
+  void _staggerChildren;
+  void _delayChildren;
+  return <div {...rest}>{children}</div>;
 }
 
 export const motionSpring = spring;

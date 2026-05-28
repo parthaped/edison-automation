@@ -29,7 +29,7 @@ describe("EdisonAutomationService", () => {
     const service = new EdisonAutomationService(repository);
     const file = await makeUploadFile("D9032-00001.pdf", "application/pdf");
 
-    const packages = await service.ingestManualFiles({
+    const { packages } = await service.ingestManualFiles({
       files: [file],
       folderId: "D9032-F",
     });

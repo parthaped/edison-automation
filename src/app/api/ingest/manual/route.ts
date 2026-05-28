@@ -3,6 +3,7 @@ import { toErrorResponse } from "@/lib/edison/app-error";
 import { getEdisonService } from "@/lib/edison/service-factory";
 
 export const runtime = "nodejs";
+export const maxDuration = 60;
 
 export async function POST(request: Request) {
   try {
@@ -16,12 +17,12 @@ export async function POST(request: Request) {
         ? rawFolderId
         : undefined;
 
-    const packages = await getEdisonService().ingestManualFiles({
+    const result = await getEdisonService().ingestManualFiles({
       files,
       folderId,
     });
 
-    return NextResponse.json({ packages }, { status: 202 });
+    return NextResponse.json(result, { status: 202 });
   } catch (error) {
     const response = toErrorResponse(error);
     return NextResponse.json(response.body, { status: response.status });

@@ -389,7 +389,7 @@ export function DocumentViewer({
       data-theme={theme}
       aria-label="Source and transcription viewer"
       className={cn(
-        "edison-viewer relative overflow-hidden rounded-2xl border border-border/70 bg-card shadow-[0_1px_2px_rgba(0,0,0,0.04),0_24px_60px_-30px_rgba(0,0,0,0.18)]",
+        "edison-viewer relative overflow-hidden border border-border bg-card",
         wrapperTheme,
         mode === "embed" ? "h-full min-h-[640px]" : "min-h-[680px]",
         className,
@@ -423,7 +423,7 @@ export function DocumentViewer({
 
       <div
         className={cn(
-          "grid min-h-[560px] gap-px bg-border/70",
+          "grid min-h-[560px] gap-px bg-border",
           gridColsClass(leftOpen, rightOpen),
         )}
       >
@@ -561,7 +561,7 @@ function Toolbar({
     <div
       role="toolbar"
       aria-label="Viewer controls"
-      className="flex flex-wrap items-center justify-between gap-3 border-b border-border/70 bg-[oklch(0.18_0.005_95)] px-3 py-2 text-[oklch(0.92_0.003_95)]"
+      className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 bg-slate-900 px-3 py-2 text-slate-200"
     >
       <div className="flex items-center gap-2">
         <ToolbarIconButton
@@ -589,9 +589,9 @@ function Toolbar({
 
         <form
           onSubmit={onPageSubmit}
-          className="flex items-center gap-1.5 rounded-md bg-white/10 px-1.5 py-1 text-[12px]"
+          className="flex items-center gap-1.5 rounded-sm bg-white/10 px-1.5 py-1 text-[12px]"
         >
-          <span className="ml-0.5 text-[11px] uppercase tracking-[0.14em] text-white/70">
+          <span className="ml-0.5 text-[11px] uppercase tracking-wide text-white/70">
             Image
           </span>
           <input
@@ -602,13 +602,13 @@ function Toolbar({
             onBlur={() => onPageSubmit()}
             aria-label="Go to page"
             disabled={pageCount === 0}
-            className="h-6 w-12 rounded-sm bg-white/10 px-1 text-center font-mono text-[12px] text-white outline-none ring-1 ring-inset ring-white/15 focus:ring-amber-300/60 disabled:opacity-50"
+            className="h-6 w-12 rounded-sm bg-white/10 px-1 text-center font-mono text-[12px] text-white outline-none ring-1 ring-inset ring-white/15 focus:ring-primary disabled:opacity-50"
           />
           <span className="text-[11px] text-white/70">of {pageCount || 0}</span>
           <button
             type="submit"
             disabled={pageCount === 0}
-            className="ml-1 inline-flex h-6 items-center justify-center rounded-sm bg-amber-500/90 px-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-amber-950 transition-colors hover:bg-amber-400 disabled:cursor-not-allowed disabled:opacity-50"
+            className="ml-1 inline-flex h-6 items-center justify-center rounded-sm bg-primary px-2 text-[11px] font-semibold uppercase tracking-wide text-primary-foreground transition-colors hover:bg-primary/85 disabled:cursor-not-allowed disabled:opacity-50"
           >
             Go
           </button>
@@ -680,7 +680,7 @@ function Toolbar({
           <RotateCw className="h-3.5 w-3.5" strokeWidth={2} />
         </ToolbarIconButton>
         <ToolbarIconButton ariaLabel="Reset view" onClick={onReset}>
-          <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.08em]">
+          <span className="font-mono text-[10px] font-semibold uppercase tracking-wide">
             1:1
           </span>
         </ToolbarIconButton>
@@ -786,10 +786,10 @@ function ContentsRail({
   return (
     <aside
       aria-label="Document contents"
-      className="flex min-h-full flex-col bg-[oklch(0.97_0.003_95)]"
+      className="flex min-h-full flex-col bg-muted/60"
     >
-      <div className="flex items-center justify-between border-b border-border/60 bg-card px-3 py-2">
-        <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+      <div className="flex items-center justify-between border-b border-border bg-card px-3 py-2">
+        <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
           Contents
         </span>
         <button
@@ -856,10 +856,10 @@ function ContentsRail({
                   type="button"
                   onClick={() => onSelect(index)}
                   className={cn(
-                    "block w-full rounded-md border px-2.5 py-1.5 text-left text-[12px] transition-colors",
+                    "block w-full rounded-sm border px-2.5 py-1.5 text-left text-[12px] transition-colors",
                     index === activePage
-                      ? "border-amber-300/80 bg-amber-50 text-amber-900 shadow-[inset_0_0_0_1px_rgba(217,119,6,0.18)]"
-                      : "border-transparent bg-card hover:border-border/70 hover:bg-muted/60",
+                      ? "border-primary/40 bg-primary/5 text-foreground"
+                      : "border-transparent bg-card hover:border-border hover:bg-muted/60",
                   )}
                 >
                   <span className="font-mono text-[11px] text-muted-foreground">
@@ -894,13 +894,13 @@ function ThumbnailButton({
       aria-label={`Go to page ${page.sourcePage}`}
       aria-pressed={active}
       className={cn(
-        "group block w-full overflow-hidden rounded-md border bg-card text-left transition-all",
+        "group block w-full overflow-hidden rounded-sm border bg-card text-left transition-all",
         active
-          ? "border-amber-400/80 shadow-[0_0_0_2px_rgba(217,119,6,0.18)]"
-          : "border-border/70 hover:border-border hover:shadow-[0_4px_10px_-6px_rgba(0,0,0,0.15)]",
+          ? "border-primary ring-1 ring-primary"
+          : "border-border hover:border-slate-400",
       )}
     >
-      <div className="relative aspect-[3/4] w-full bg-[oklch(0.97_0.005_85)]">
+      <div className="relative aspect-[3/4] w-full bg-slate-100">
         {page.originalUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
@@ -922,12 +922,12 @@ function ThumbnailButton({
 
 function FacsimileMiniature() {
   return (
-    <div className="flex h-full w-full flex-col gap-1.5 bg-[oklch(0.97_0.012_85)] p-2.5">
-      <span className="h-1 w-2/3 rounded-full bg-foreground/15" />
-      <span className="h-1 w-full rounded-full bg-foreground/10" />
-      <span className="h-1 w-5/6 rounded-full bg-foreground/10" />
-      <span className="h-1 w-4/6 rounded-full bg-foreground/10" />
-      <span className="mt-auto h-1 w-1/2 rounded-full bg-foreground/15" />
+    <div className="flex h-full w-full flex-col gap-1.5 bg-slate-100 p-2.5">
+      <span className="h-1 w-2/3 rounded-full bg-slate-400/40" />
+      <span className="h-1 w-full rounded-full bg-slate-400/30" />
+      <span className="h-1 w-5/6 rounded-full bg-slate-400/30" />
+      <span className="h-1 w-4/6 rounded-full bg-slate-400/30" />
+      <span className="mt-auto h-1 w-1/2 rounded-full bg-slate-400/40" />
     </div>
   );
 }
@@ -999,7 +999,7 @@ function SourceStage({
       onDoubleClick={onDoubleClick}
       style={stageStyle}
       className={cn(
-        "relative flex min-h-[520px] items-center justify-center overflow-hidden bg-[oklch(0.16_0.004_95)] p-6 sm:p-10",
+        "relative flex min-h-[520px] items-center justify-center overflow-hidden bg-slate-950 p-6 sm:p-10",
         cursorClass,
       )}
     >
@@ -1062,13 +1062,13 @@ function GridLayout({
           onClick={() => onSelect(index)}
           aria-label={`Go to page ${page.sourcePage}`}
           className={cn(
-            "group overflow-hidden rounded-lg border bg-card text-left transition-all",
+            "group overflow-hidden rounded-sm border bg-card text-left transition-all",
             index === activePage
-              ? "border-amber-400 shadow-[0_0_0_3px_rgba(217,119,6,0.25)]"
+              ? "border-primary ring-2 ring-primary/50"
               : "border-white/10 hover:border-white/30",
           )}
         >
-          <div className="relative aspect-[3/4] w-full bg-[oklch(0.97_0.012_85)]">
+          <div className="relative aspect-[3/4] w-full bg-slate-100">
             {page.originalUrl ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img
@@ -1116,7 +1116,7 @@ function FacsimileSheet({ page }: { page: PageImage }) {
         aria-hidden="true"
         className="pointer-events-none absolute inset-x-10 top-7 h-[1px] bg-[oklch(0.78_0.04_75)]/60"
       />
-      <header className="mb-6 flex items-center justify-between text-[10px] uppercase tracking-[0.22em] text-[oklch(0.45_0.04_70)]">
+      <header className="mb-6 flex items-center justify-between text-[10px] uppercase tracking-wide text-[oklch(0.45_0.04_70)]">
         <span>Edison Papers Facsimile</span>
         <span className="font-mono">Page {page.sourcePage}</span>
       </header>
@@ -1140,7 +1140,7 @@ function FacsimileSheet({ page }: { page: PageImage }) {
           <span className="font-semibold">Signature:</span> W. D. Marks
         </p>
       </div>
-      <footer className="mt-10 flex items-center justify-between text-[10px] uppercase tracking-[0.18em] text-[oklch(0.5_0.04_70)]">
+      <footer className="mt-10 flex items-center justify-between text-[10px] uppercase tracking-wide text-[oklch(0.5_0.04_70)]">
         <span className="font-mono">{page.imageFilename}</span>
         <span>Source image not yet attached</span>
       </footer>
@@ -1152,17 +1152,16 @@ function AttributionChip({ filename }: { filename: string }) {
   return (
     <div
       className={cn(
-        "pointer-events-none absolute bottom-3 left-3 max-w-[260px] rounded-md border border-white/10 bg-black/55 px-3 py-2 text-[11px] leading-snug text-white/85 shadow-[0_8px_24px_-12px_rgba(0,0,0,0.6)] backdrop-blur",
+        "pointer-events-none absolute bottom-3 left-3 max-w-[260px] rounded-sm border border-white/10 bg-slate-950/70 px-3 py-2 text-[11px] leading-snug text-white/85 backdrop-blur",
       )}
     >
-      <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/65">
+      <p className="text-[10px] font-semibold uppercase tracking-wide text-white/65">
         Attribution
       </p>
       <p className="mt-0.5">
         Thomas A. Edison Papers, Rutgers University.
         <br />
-        Terms of use:{" "}
-        <span className="font-medium text-amber-200/95">CC-BY-NC 4.0</span>
+        Terms of use: <span className="font-medium text-white">CC-BY-NC 4.0</span>
       </p>
       <p className="mt-1 font-mono text-[10px] text-white/55">{filename}</p>
     </div>
@@ -1186,10 +1185,10 @@ function SettingsPopover({
     <div
       role="dialog"
       aria-label="Viewer settings"
-      className="absolute right-3 top-3 z-10 w-60 rounded-lg border border-white/10 bg-card p-3 text-sm shadow-[0_24px_60px_-20px_rgba(0,0,0,0.45)]"
+      className="absolute right-3 top-3 z-10 w-60 rounded-sm border border-border bg-card p-3 text-sm shadow-[0_8px_24px_-12px_rgba(15,23,42,0.25)]"
     >
       <div className="flex items-center justify-between">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
           View settings
         </p>
         <button
@@ -1211,7 +1210,7 @@ function SettingsPopover({
           value={zoom}
           onChange={(event) => onZoomSlider(Number(event.target.value))}
           aria-valuetext={`${Math.round(zoom * 100)}%`}
-          className="mt-1.5 block w-full accent-amber-500"
+          className="mt-1.5 block w-full accent-[color:var(--primary)]"
         />
         <span className="font-mono text-[11px] text-muted-foreground">
           {Math.round(zoom * 100)}%
@@ -1283,14 +1282,14 @@ function TranscriptionPane({
       aria-label="Transcription editor"
       className="flex min-h-full flex-col bg-card"
     >
-      <header className="flex items-start justify-between gap-3 border-b border-border/60 px-4 py-3">
+      <header className="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
         <div className="min-w-0">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-amber-700/90">
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
             More information
           </p>
           <label
             htmlFor="transcription"
-            className="mt-0.5 block truncate text-[15px] font-semibold tracking-[-0.01em] text-foreground"
+            className="mt-0.5 block truncate text-[15px] font-semibold text-foreground"
           >
             Diplomatic transcription
           </label>
@@ -1315,8 +1314,8 @@ function TranscriptionPane({
       </header>
 
       {uncertain.length > 0 ? (
-        <div className="flex flex-wrap items-center gap-1.5 border-b border-border/60 bg-amber-50/50 px-4 py-2.5">
-          <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-amber-900/80">
+        <div className="flex flex-wrap items-center gap-1.5 border-b border-border bg-amber-50/40 px-4 py-2.5">
+          <span className="text-[10px] font-semibold uppercase tracking-wide text-amber-800">
             Uncertain ({uncertain.length})
           </span>
           {uncertain.map((token) => (
@@ -1324,7 +1323,7 @@ function TranscriptionPane({
               key={token}
               type="button"
               onClick={() => onSelectUncertain(token)}
-              className="inline-flex items-center rounded-full border border-amber-300/80 bg-white px-2 py-0.5 font-mono text-[11px] text-amber-900 transition-colors hover:bg-amber-100"
+              className="inline-flex items-center rounded-sm border border-amber-300/80 bg-white px-2 py-0.5 font-mono text-[11px] text-amber-900 transition-colors hover:bg-amber-50"
             >
               {token}
             </button>
@@ -1340,7 +1339,7 @@ function TranscriptionPane({
             animate={{ opacity: 0 }}
             transition={{ duration: 1.2, ease: "easeOut" }}
             aria-hidden="true"
-            className="pointer-events-none absolute left-4 right-6 rounded-md bg-amber-300/40 ring-1 ring-amber-400/40"
+            className="pointer-events-none absolute left-4 right-6 rounded-sm bg-primary/15 ring-1 ring-primary/30"
             style={{ top: scrollHint.top + 12, height: scrollHint.height }}
           />
         ) : null}
@@ -1351,11 +1350,11 @@ function TranscriptionPane({
           onChange={onChange}
           onKeyDown={handleKeyDown}
           spellCheck={false}
-          className="block h-full min-h-[420px] w-full resize-none rounded-md border border-border/80 bg-card px-3 py-3 font-mono text-[13px] leading-6 text-foreground transition-shadow placeholder:text-muted-foreground/70 focus:border-amber-400/70 focus:outline-none focus:ring-4 focus:ring-amber-300/30"
+          className="block h-full min-h-[420px] w-full resize-none rounded-sm border border-border bg-card px-3 py-3 font-mono text-[13px] leading-6 text-foreground transition-shadow placeholder:text-muted-foreground/70 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
         />
       </div>
 
-      <footer className="flex items-center justify-between gap-3 border-t border-border/60 px-4 py-2 text-[11px] text-muted-foreground">
+      <footer className="flex items-center justify-between gap-3 border-t border-border px-4 py-2 text-[11px] text-muted-foreground">
         <span className="font-mono tabular-nums">
           {characterCount} ch
         </span>
@@ -1391,7 +1390,7 @@ function BottomBar({
   pageIndicator,
 }: BottomBarProps) {
   return (
-    <div className="flex items-center justify-between gap-3 border-t border-border/70 bg-[oklch(0.18_0.005_95)] px-3 py-2 text-[12px] text-white/80">
+    <div className="flex items-center justify-between gap-3 border-t border-slate-800 bg-slate-900 px-3 py-2 text-[12px] text-white/80">
       <div className="flex items-center gap-1.5">
         <BottomIconButton ariaLabel="Download source" onClick={onDownload}>
           <Download className="h-3.5 w-3.5" strokeWidth={1.8} />

@@ -2,20 +2,16 @@
 
 import {
   AlertTriangle,
-  CheckCircle2,
   ChevronLeft,
   ChevronRight,
   ExternalLink,
   Save,
 } from "lucide-react";
 import Link from "next/link";
-import { motion } from "motion/react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { DocumentViewer } from "@/components/document-viewer";
-import { motionSpring } from "@/components/motion-primitives";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Select,
@@ -24,7 +20,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Separator } from "@/components/ui/separator";
 import type {
   ConfidenceBucket,
   DocumentPackage,
@@ -50,11 +45,11 @@ const decisions: Array<{ value: ReviewDecision; label: string }> = [
   { value: "rejected", label: "Reject" },
 ];
 
-const confidenceClasses: Record<ConfidenceBucket, string> = {
-  high: "border-emerald-200/70 bg-emerald-50/80 text-emerald-700",
-  medium: "border-amber-200/70 bg-amber-50/80 text-amber-700",
-  low: "border-rose-200/70 bg-rose-50/80 text-rose-700",
-  blocked: "border-border bg-muted/70 text-foreground/70",
+const confidenceDot: Record<ConfidenceBucket, string> = {
+  high: "bg-emerald-500",
+  medium: "bg-amber-500",
+  low: "bg-rose-500",
+  blocked: "bg-slate-400",
 };
 
 export function ReviewerWorkbench({
@@ -71,16 +66,14 @@ export function ReviewerWorkbench({
 
   if (!activeDocument) {
     return (
-      <Card className="surface-elevated border-dashed">
-        <CardContent className="py-12 text-center">
-          <h2 className="text-2xl font-semibold tracking-[-0.01em]">
-            No reviewable documents
-          </h2>
-          <p className="mt-3 text-muted-foreground">
-            New documents will appear here after ingest and extraction complete.
-          </p>
-        </CardContent>
-      </Card>
+      <div className="border border-dashed border-border bg-card px-6 py-12 text-center">
+        <h3 className="text-lg font-semibold text-foreground">
+          No reviewable documents
+        </h3>
+        <p className="mt-2 text-sm text-muted-foreground">
+          New documents will appear here after ingest and extraction complete.
+        </p>
+      </div>
     );
   }
 
@@ -103,30 +96,35 @@ export function ReviewerWorkbench({
   return (
     <section
       aria-labelledby="review-workbench-title"
-      className="surface-elevated space-y-6 rounded-2xl p-5 lg:p-7"
+      className="border border-border bg-card"
     >
-      <header className="flex flex-wrap items-start justify-between gap-3">
+      <header className="flex flex-wrap items-start justify-between gap-3 border-b border-border px-5 py-4">
         <div className="min-w-0">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-amber-700/90">
-            Review queue {queuePosition}
+          <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+            Review queue · Record {queuePosition}
           </p>
           <h2
             id="review-workbench-title"
-            className="mt-1.5 truncate text-2xl font-semibold tracking-[-0.02em] text-foreground"
+            className="mt-1 truncate text-[18px] font-semibold text-foreground"
           >
             {activeDocument.title}
           </h2>
         </div>
-        <div className="flex items-center gap-1.5">
-          <Link
-            href={`/viewer/${activeDocument.documentId}?panel=both`}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex h-8 items-center gap-1.5 rounded-full border border-border/80 bg-card px-3 text-[13px] font-medium text-foreground shadow-[0_1px_2px_rgba(0,0,0,0.04)] transition-colors hover:bg-muted/60"
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            render={
+              <Link
+                href={`/viewer/${activeDocument.documentId}?panel=both`}
+                target="_blank"
+                rel="noreferrer"
+              />
+            }
           >
             <ExternalLink className="h-3.5 w-3.5" strokeWidth={1.8} aria-hidden="true" />
             Open standalone
-          </Link>
+          </Button>
           <NavButton
             direction="prev"
             onClick={() => goToDocument(activeIndex - 1)}
@@ -140,48 +138,46 @@ export function ReviewerWorkbench({
         </div>
       </header>
 
-      <InfoBar document={activeDocument} />
+      <div className="border-b border-border px-5 py-4">
+        <InfoBar document={activeDocument} />
+      </div>
 
-      <DocumentViewer
-        document={activeDocument}
-        transcription={transcription}
-        mode="workbench"
-        initialPanel="transcription"
-        onTranscriptionChange={setEditedText}
-      />
+      <div className="border-b border-border bg-muted/40 p-3">
+        <DocumentViewer
+          document={activeDocument}
+          transcription={transcription}
+          mode="workbench"
+          initialPanel="transcription"
+          onTranscriptionChange={setEditedText}
+        />
+      </div>
 
-      <div className="grid gap-5 lg:grid-cols-2">
-        <Card className="surface-elevated">
-          <CardHeader>
-            <CardTitle className="text-base font-semibold tracking-[-0.01em]">
-              Metadata checks
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
+      <div className="grid gap-0 border-b border-border md:grid-cols-2 md:divide-x md:divide-border">
+        <div className="border-b border-border md:border-b-0">
+          <PanelHeading>Metadata checks</PanelHeading>
+          <div className="px-5 py-4">
             <MetadataRows metadata={metadata} />
-          </CardContent>
-        </Card>
+          </div>
+        </div>
 
-        <Card className="ring-amber-200/70 bg-amber-50/40">
-          <CardHeader>
-            <div className="flex items-center gap-2">
+        <div className="border-l-[3px] border-l-amber-500">
+          <PanelHeading>
+            <span className="inline-flex items-center gap-1.5">
               <AlertTriangle
-                className="h-4 w-4 text-amber-700"
-                strokeWidth={1.5}
+                className="h-3.5 w-3.5 text-amber-600"
+                strokeWidth={1.8}
                 aria-hidden="true"
               />
-              <CardTitle className="text-base font-semibold tracking-[-0.01em] text-amber-900">
-                Uncertainty and cost
-              </CardTitle>
-            </div>
-          </CardHeader>
-          <CardContent>
+              Uncertainty and cost
+            </span>
+          </PanelHeading>
+          <div className="px-5 py-4">
             {activeDocument.uncertaintyNotes.length > 0 ? (
-              <ul className="space-y-2">
+              <ul className="divide-y divide-border text-sm">
                 {activeDocument.uncertaintyNotes.map((note) => (
                   <li
                     key={note}
-                    className="flex items-start gap-2 rounded-lg bg-white/80 px-3 py-2 text-sm text-foreground/90 shadow-[0_1px_2px_rgba(0,0,0,0.03)]"
+                    className="flex items-start gap-2 py-2 text-foreground"
                   >
                     <span
                       aria-hidden="true"
@@ -192,87 +188,68 @@ export function ReviewerWorkbench({
                 ))}
               </ul>
             ) : (
-              <p className="text-sm text-foreground/70">No uncertainty notes.</p>
+              <p className="text-sm text-muted-foreground">No uncertainty notes.</p>
             )}
-            <p className="mt-3 text-[12px] text-amber-900/80">
-              Model: <span className="font-mono">{transcription.model}</span>
+            <p className="mt-3 text-[12px] text-muted-foreground">
+              Model: <span className="font-mono text-foreground">{transcription.model}</span>
               {" \u00b7 "}
               Prompt v{transcription.promptVersion}
               {" \u00b7 "}
               Cost: ${transcription.costUsd?.toFixed(3) ?? "0.000"}
             </p>
-          </CardContent>
-        </Card>
+          </div>
+        </div>
       </div>
 
-      <div className="grid gap-5 lg:grid-cols-[1fr_1.2fr]">
-        <Card className="surface-elevated">
-          <CardHeader>
-            <CardTitle className="text-base font-semibold tracking-[-0.01em]">
-              Review action
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-3">
-              <div>
-                <label
-                  htmlFor="decision"
-                  className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground"
-                >
-                  Decision
-                </label>
-                <div className="mt-1.5">
-                  <Select
-                    value={decision}
-                    onValueChange={(value) =>
-                      setDecision(value as ReviewDecision)
-                    }
-                  >
-                    <SelectTrigger
-                      id="decision"
-                      size="default"
-                      className="w-full"
-                    >
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {decisions.map((item) => (
-                        <SelectItem key={item.value} value={item.value}>
-                          {item.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-              <Button
-                type="button"
-                size="lg"
-                className="w-full gap-2 rounded-xl"
-                onClick={handleSave}
+      <div className="grid gap-0 md:grid-cols-[1fr_1.2fr] md:divide-x md:divide-border">
+        <div className="border-b border-border md:border-b-0">
+          <PanelHeading>Review action</PanelHeading>
+          <div className="space-y-3 px-5 py-4">
+            <div>
+              <label
+                htmlFor="decision"
+                className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground"
               >
-                <Save className="h-4 w-4" strokeWidth={1.8} aria-hidden="true" />
-                Save review action
-              </Button>
+                Decision
+              </label>
+              <div className="mt-1.5">
+                <Select
+                  value={decision}
+                  onValueChange={(value) =>
+                    setDecision(value as ReviewDecision)
+                  }
+                >
+                  <SelectTrigger id="decision" size="default" className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {decisions.map((item) => (
+                      <SelectItem key={item.value} value={item.value}>
+                        {item.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
-          </CardContent>
-        </Card>
+            <Button type="button" size="default" className="gap-2" onClick={handleSave}>
+              <Save className="h-3.5 w-3.5" strokeWidth={1.8} aria-hidden="true" />
+              Save review action
+            </Button>
+          </div>
+        </div>
 
-        <Card className="surface-elevated">
-          <CardHeader>
-            <CardTitle className="text-base font-semibold tracking-[-0.01em]">
-              Audit trail
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
+        <div>
+          <PanelHeading>Audit trail</PanelHeading>
+          <div className="px-5 py-4">
             {reviewEvents.length > 0 ? (
               <ScrollArea className="max-h-64 pr-2">
-                <ol className="space-y-3">
+                <ol className="space-y-3 border-l border-border pl-4">
                   {reviewEvents.map((event) => (
-                    <li key={event.id} className="relative pl-5">
+                    <li key={event.id} className="relative">
                       <span
                         aria-hidden="true"
-                        className="absolute left-0 top-1.5 inline-block h-1.5 w-1.5 rounded-full bg-amber-500/80"
+                        className="absolute -left-[18px] top-1.5 inline-block h-1.5 w-1.5 rounded-full bg-slate-400"
                       />
                       <p className="text-sm font-medium text-foreground">
                         {event.decision.replaceAll("_", " ")}
@@ -287,10 +264,18 @@ export function ReviewerWorkbench({
             ) : (
               <p className="text-sm text-muted-foreground">No reviews yet.</p>
             )}
-          </CardContent>
-        </Card>
+          </div>
+        </div>
       </div>
     </section>
+  );
+}
+
+function PanelHeading({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="border-b border-border bg-muted/60 px-5 py-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+      {children}
+    </div>
   );
 }
 
@@ -305,13 +290,12 @@ function NavButton({
 }) {
   const isPrev = direction === "prev";
   return (
-    <motion.button
+    <Button
       type="button"
+      variant="outline"
+      size="sm"
       onClick={onClick}
       disabled={disabled}
-      whileTap={disabled ? undefined : { scale: 0.96 }}
-      transition={motionSpring}
-      className="inline-flex h-8 items-center gap-1 rounded-full border border-border/80 bg-card px-3 text-[13px] font-medium text-foreground shadow-[0_1px_2px_rgba(0,0,0,0.04)] transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/60 focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-40"
     >
       {isPrev ? (
         <ChevronLeft className="h-3.5 w-3.5" strokeWidth={1.8} aria-hidden="true" />
@@ -320,27 +304,24 @@ function NavButton({
       {!isPrev ? (
         <ChevronRight className="h-3.5 w-3.5" strokeWidth={1.8} aria-hidden="true" />
       ) : null}
-    </motion.button>
+    </Button>
   );
 }
 
 function InfoBar({ document }: { document: DocumentPackage }) {
   const statusLabel = document.status.replaceAll("_", " ");
   return (
-    <div className="grid gap-px overflow-hidden rounded-2xl border border-border/70 bg-border/70 sm:grid-cols-2 lg:grid-cols-4">
+    <dl className="grid grid-cols-2 gap-y-3 text-sm md:grid-cols-4 md:gap-y-0 md:divide-x md:divide-border">
       <InfoCell label="Folder ID" value={document.folderId} mono />
       <InfoCell label="Document ID" value={document.documentId} mono />
       <InfoCell
         label="Confidence"
         valueNode={
-          <span
-            className={`inline-flex h-6 items-center rounded-full border px-2.5 text-[11px] font-semibold uppercase tracking-[0.08em] ${
-              confidenceClasses[document.confidence]
-            }`}
-          >
-            {document.confidence === "high" ? (
-              <CheckCircle2 className="mr-1 h-3 w-3" strokeWidth={2} />
-            ) : null}
+          <span className="inline-flex items-center gap-1.5 text-sm capitalize text-foreground">
+            <span
+              aria-hidden="true"
+              className={`inline-block h-1.5 w-1.5 rounded-full ${confidenceDot[document.confidence]}`}
+            />
             {document.confidence}
           </span>
         }
@@ -348,12 +329,10 @@ function InfoBar({ document }: { document: DocumentPackage }) {
       <InfoCell
         label="Status"
         valueNode={
-          <span className="inline-flex h-6 items-center rounded-full border border-border bg-card px-2.5 text-[11px] font-medium capitalize tracking-wide text-foreground">
-            {statusLabel}
-          </span>
+          <span className="text-sm capitalize text-foreground">{statusLabel}</span>
         }
       />
-    </div>
+    </dl>
   );
 }
 
@@ -369,11 +348,11 @@ function InfoCell({
   mono?: boolean;
 }) {
   return (
-    <div className="bg-card px-4 py-3.5">
-      <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+    <div className="md:px-4 md:first:pl-0 md:last:pr-0">
+      <dt className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
         {label}
-      </p>
-      <div className="mt-1.5">
+      </dt>
+      <dd className="mt-1">
         {valueNode ?? (
           <span
             className={`break-words text-sm font-medium text-foreground ${
@@ -383,7 +362,7 @@ function InfoCell({
             {value}
           </span>
         )}
-      </div>
+      </dd>
     </div>
   );
 }
@@ -401,24 +380,24 @@ function MetadataRows({ metadata }: { metadata: MetadataExtraction }) {
   );
 
   return (
-    <dl className="space-y-3 text-sm">
-      {rows.map((row, idx) => (
-        <div key={row.label}>
-          <div className="flex flex-wrap items-baseline justify-between gap-3">
-            <dt className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+    <table className="w-full border-collapse text-sm">
+      <tbody>
+        {rows.map((row) => (
+          <tr key={row.label} className="border-t border-border first:border-t-0">
+            <th
+              scope="row"
+              className="w-[35%] py-2 pr-3 text-left align-top text-[11px] font-medium uppercase tracking-wide text-muted-foreground"
+            >
               {row.label}
-            </dt>
-            <dd className="text-right font-medium text-foreground">
+            </th>
+            <td className="py-2 text-right align-top font-medium text-foreground">
               {row.value || (
                 <span className="text-muted-foreground/70">—</span>
               )}
-            </dd>
-          </div>
-          {idx < rows.length - 1 ? (
-            <Separator className="mt-3 bg-border/70" />
-          ) : null}
-        </div>
-      ))}
-    </dl>
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
   );
 }

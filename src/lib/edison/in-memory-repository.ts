@@ -137,6 +137,25 @@ export class InMemoryEdisonRepository implements EdisonRepository {
     }));
   }
 
+  async listExportRowsByIds(documentIds: string[]) {
+    const rows: Array<{
+      document: DocumentPackage;
+      metadata: MetadataExtraction;
+      transcription: TranscriptionRun;
+    }> = [];
+    for (const documentId of documentIds) {
+      const document = this.documents.get(documentId);
+      if (!document) continue;
+      rows.push({
+        document,
+        metadata: this.metadata.get(documentId) ?? emptyMetadata(document),
+        transcription:
+          this.transcriptions.get(documentId) ?? emptyTranscription(documentId),
+      });
+    }
+    return rows;
+  }
+
   async appendReviewEvent(event: ReviewEvent): Promise<void> {
     this.reviewEvents.push(event);
   }

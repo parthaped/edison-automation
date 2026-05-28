@@ -1,26 +1,8 @@
-import {
-  AlertTriangle,
-  Archive,
-  ArrowRight,
-  CheckCircle2,
-  Clock,
-  Download,
-  FileWarning,
-  type LucideIcon,
-} from "lucide-react";
+import { Download } from "lucide-react";
 import Image from "next/image";
+import Link from "next/link";
 import { ReviewerWorkbench } from "@/components/reviewer-workbench";
-import { FadeRise, Stagger } from "@/components/motion-primitives";
-import { Badge } from "@/components/ui/badge";
-import { buttonVariants } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Separator } from "@/components/ui/separator";
+import { Button } from "@/components/ui/button";
 import { getEdisonService } from "@/lib/edison/service-factory";
 
 const requirements = [
@@ -30,167 +12,141 @@ const requirements = [
   "Corrupt, password-protected, unsupported, or huge files are routed to manual review",
 ];
 
+const omekaFields: Array<{ label: string; value: string; example: string }> = [
+  {
+    label: "Folder model",
+    value: "Omeka item set identifier",
+    example: "D9032-F",
+  },
+  {
+    label: "Document model",
+    value: "Omeka item identifier",
+    example: "D9032-00001",
+  },
+];
+
+const nav: Array<{ label: string; href: string; active?: boolean }> = [
+  { label: "Review queue", href: "/", active: true },
+  { label: "Records", href: "/" },
+  { label: "Upload", href: "/upload" },
+  { label: "Audit trail", href: "/" },
+];
+
 export default async function Home() {
   const { summary, reviewCase } = await getEdisonService().getDashboard();
 
   return (
     <div className="min-h-screen bg-background text-foreground">
-      <TopBar />
+      <SiteHeader />
 
-      <main className="mx-auto w-full max-w-6xl px-6 pb-24 pt-14 sm:px-8 lg:px-10">
-        <Hero />
+      <main className="mx-auto w-full max-w-6xl px-6 pb-20 pt-8 sm:px-8 lg:px-10">
+        <PageHeader />
 
-        <section aria-labelledby="queue-title" className="mt-20">
-          <FadeRise delay={0.05}>
-            <div className="flex flex-wrap items-end justify-between gap-3">
-              <div>
-                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-amber-700/90">
-                  Processing queues
-                </p>
-                <h2
-                  id="queue-title"
-                  className="mt-2 text-3xl font-semibold tracking-[-0.02em] text-foreground"
-                >
-                  What needs attention
-                </h2>
-              </div>
-              <p className="max-w-xs text-sm text-muted-foreground">
-                Live counts across ingest, transcription, review, and Omeka export queues.
+        <section aria-labelledby="queue-title" className="mt-8">
+          <SectionHeader
+            id="queue-title"
+            title="Processing queues"
+            caption="Live counts across ingest, transcription, review, and Omeka export queues."
+          />
+          <StatStrip
+            cells={[
+              {
+                label: "Low confidence",
+                count: summary.lowConfidence,
+                caption: "Requires careful human review before export.",
+                marker: "rose",
+              },
+              {
+                label: "Medium confidence",
+                count: summary.mediumConfidence,
+                caption: "Ready for normal review and corrections.",
+                marker: "amber",
+              },
+              {
+                label: "Blocked ingest",
+                count: summary.blocked,
+                caption: "Unsupported, corrupt, encrypted, or oversized files.",
+                marker: "neutral",
+              },
+              {
+                label: "Ready to export",
+                count: summary.readyToExport,
+                caption: "Approved records waiting for Omeka upload.",
+                marker: "neutral",
+              },
+            ]}
+          />
+        </section>
+
+        <section aria-labelledby="reference-title" className="mt-10">
+          <SectionHeader
+            id="reference-title"
+            title="Pipeline reference"
+            caption="Inputs the pipeline accepts and the Omeka identifiers it emits."
+          />
+          <div className="grid divide-y divide-border border border-border bg-card md:grid-cols-2 md:divide-x md:divide-y-0">
+            <div className="p-5">
+              <h3 className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                Incoming file requirements
+              </h3>
+              <ul className="mt-3 divide-y divide-border text-sm text-foreground">
+                {requirements.map((item) => (
+                  <li key={item} className="py-2 leading-snug">
+                    {item}
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <div className="p-5">
+              <h3 className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                Omeka alignment
+              </h3>
+              <table className="mt-3 w-full border-collapse text-sm">
+                <tbody>
+                  {omekaFields.map((row) => (
+                    <tr key={row.label} className="border-t border-border first:border-t-0">
+                      <th
+                        scope="row"
+                        className="w-[40%] py-2 pr-3 text-left align-top font-medium text-foreground"
+                      >
+                        {row.label}
+                      </th>
+                      <td className="py-2 align-top text-muted-foreground">
+                        <div>{row.value}</div>
+                        <code className="mt-1 inline-block rounded-sm bg-muted px-1.5 py-0.5 font-mono text-[12px] text-foreground">
+                          {row.example}
+                        </code>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <section aria-labelledby="review-title" className="mt-10">
+          <SectionHeader
+            id="review-title"
+            title="Reviewer workbench"
+            caption="Open record, source images, transcription, and audit trail for the next item in queue."
+          />
+          {reviewCase ? (
+            <ReviewerWorkbench
+              documents={reviewCase.documents}
+              transcription={reviewCase.transcription}
+              metadata={reviewCase.metadata}
+              reviewEvents={reviewCase.reviewEvents}
+            />
+          ) : (
+            <div className="border border-dashed border-border bg-card px-6 py-14 text-center">
+              <h3 className="text-lg font-semibold text-foreground">
+                No documents have been ingested yet.
+              </h3>
+              <p className="mt-2 text-sm text-muted-foreground">
+                Upload a batch or connect a Box folder to start the review workflow.
               </p>
             </div>
-          </FadeRise>
-
-          <Stagger className="mt-8 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            <QueueCard
-              icon={FileWarning}
-              label="Low confidence"
-              count={summary.lowConfidence}
-              detail="Requires careful human review before export."
-              accent="rose"
-            />
-            <QueueCard
-              icon={Clock}
-              label="Medium confidence"
-              count={summary.mediumConfidence}
-              detail="Ready for normal review and corrections."
-              accent="amber"
-            />
-            <QueueCard
-              icon={AlertTriangle}
-              label="Blocked ingest"
-              count={summary.blocked}
-              detail="Unsupported, corrupt, encrypted, or oversized files."
-              accent="neutral"
-            />
-            <QueueCard
-              icon={CheckCircle2}
-              label="Ready to export"
-              count={summary.readyToExport}
-              detail="Approved records waiting for Omeka upload."
-              accent="emerald"
-            />
-          </Stagger>
-        </section>
-
-        <section className="mt-16 grid gap-5 lg:grid-cols-[1.15fr_0.85fr]">
-          <FadeRise delay={0.1}>
-            <Card className="h-full surface-elevated">
-              <CardHeader>
-                <CardTitle className="text-xl font-semibold tracking-[-0.01em]">
-                  Incoming file requirements
-                </CardTitle>
-                <CardDescription>
-                  What the pipeline expects when materials arrive from Box.
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <ul className="grid gap-2.5 md:grid-cols-2">
-                  {requirements.map((item) => (
-                    <li
-                      key={item}
-                      className="group flex items-start gap-3 rounded-xl border border-border/60 bg-muted/40 px-4 py-3 text-sm text-foreground/85 transition-colors hover:border-border hover:bg-muted/70"
-                    >
-                      <span
-                        aria-hidden="true"
-                        className="mt-1.5 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500/70"
-                      />
-                      <span className="leading-snug">{item}</span>
-                    </li>
-                  ))}
-                </ul>
-              </CardContent>
-            </Card>
-          </FadeRise>
-
-          <FadeRise delay={0.15}>
-            <Card className="h-full surface-elevated">
-              <CardHeader>
-                <div className="flex items-start gap-3">
-                  <div className="rounded-xl border border-amber-200/70 bg-amber-50/80 p-2 text-amber-700">
-                    <Archive className="h-5 w-5" strokeWidth={1.5} aria-hidden="true" />
-                  </div>
-                  <div>
-                    <CardTitle className="text-xl font-semibold tracking-[-0.01em]">
-                      Omeka alignment
-                    </CardTitle>
-                    <CardDescription>
-                      Folder ID, Doc ID, media names, and export fields stay visible.
-                    </CardDescription>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <dl className="space-y-4 text-sm">
-                  <div>
-                    <dt className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                      Folder model
-                    </dt>
-                    <dd className="mt-1 font-medium text-foreground">
-                      Omeka item set identifier, such as{" "}
-                      <code className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-[0.8em] text-foreground">
-                        D9032-F
-                      </code>
-                    </dd>
-                  </div>
-                  <Separator className="bg-border/70" />
-                  <div>
-                    <dt className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                      Document model
-                    </dt>
-                    <dd className="mt-1 font-medium text-foreground">
-                      Omeka item identifier, such as{" "}
-                      <code className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-[0.8em] text-foreground">
-                        D9032-00001
-                      </code>
-                    </dd>
-                  </div>
-                </dl>
-              </CardContent>
-            </Card>
-          </FadeRise>
-        </section>
-
-        <section className="mt-16">
-          {reviewCase ? (
-            <FadeRise delay={0.2}>
-              <ReviewerWorkbench
-                documents={reviewCase.documents}
-                transcription={reviewCase.transcription}
-                metadata={reviewCase.metadata}
-                reviewEvents={reviewCase.reviewEvents}
-              />
-            </FadeRise>
-          ) : (
-            <Card className="surface-elevated border-dashed">
-              <CardContent className="py-16 text-center">
-                <h2 className="text-2xl font-semibold tracking-[-0.01em]">
-                  No documents have been ingested yet.
-                </h2>
-                <p className="mt-3 text-muted-foreground">
-                  Upload a batch or connect a Box folder to start the review workflow.
-                </p>
-              </CardContent>
-            </Card>
           )}
         </section>
       </main>
@@ -198,142 +154,167 @@ export default async function Home() {
   );
 }
 
-function TopBar() {
+function SiteHeader() {
   return (
-    <header className="sticky top-0 z-30 border-b border-border/70 bg-background/80 backdrop-blur supports-[backdrop-filter]:bg-background/65">
-      <div className="mx-auto flex h-14 w-full max-w-6xl items-center justify-between gap-4 px-6 sm:px-8 lg:px-10">
-        <div className="flex items-center gap-3">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-amber-200/70 bg-white shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
-            <Image
-              src="/favicon.svg"
-              alt=""
-              width={18}
-              height={24}
-              priority
-              aria-hidden="true"
-            />
-          </div>
-          <div className="flex flex-col leading-none">
-            <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-amber-700/90">
+    <header className="border-b border-border bg-background">
+      <div className="bg-[#0f2548] text-white">
+        <div className="mx-auto flex h-8 w-full max-w-6xl items-center justify-between px-6 text-[11px] sm:px-8 lg:px-10">
+          <span className="truncate">
+            Thomas A. Edison Papers · Rutgers University · School of Arts and Sciences
+          </span>
+          <span className="hidden text-white/70 sm:inline">
+            Workbench · Internal
+          </span>
+        </div>
+        <div className="h-px w-full bg-amber-500/80" aria-hidden="true" />
+      </div>
+
+      <div className="mx-auto flex h-14 w-full max-w-6xl items-center justify-between gap-6 px-6 sm:px-8 lg:px-10">
+        <div className="flex min-w-0 items-center gap-3">
+          <Image
+            src="/favicon.svg"
+            alt=""
+            width={18}
+            height={24}
+            priority
+            aria-hidden="true"
+            className="shrink-0"
+          />
+          <div className="flex min-w-0 flex-col leading-tight">
+            <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
               Edison Papers
             </span>
-            <span className="mt-0.5 text-sm font-semibold tracking-[-0.01em] text-foreground">
+            <span className="truncate text-[15px] font-semibold text-foreground">
               Automation Workbench
             </span>
           </div>
         </div>
         <a
           href="/api/export/omeka"
-          className={buttonVariants({
-            size: "sm",
-            className: "gap-2 rounded-full px-4 shadow-[0_1px_2px_rgba(0,0,0,0.06)]",
-          })}
+          className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-card px-3 text-[13px] font-medium text-foreground transition-colors hover:bg-muted"
         >
           <Download className="h-3.5 w-3.5" strokeWidth={1.8} aria-hidden="true" />
           Download Omeka CSV
         </a>
       </div>
+
+      <nav
+        aria-label="Primary"
+        className="border-t border-border bg-background"
+      >
+        <ul className="mx-auto flex w-full max-w-6xl items-stretch gap-1 px-6 text-[13px] sm:px-8 lg:px-10">
+          {nav.map((item) => (
+            <li key={item.label}>
+              <Link
+                href={item.href}
+                aria-current={item.active ? "page" : undefined}
+                className={
+                  item.active
+                    ? "inline-flex h-10 items-center border-b-2 border-primary px-3 font-semibold text-foreground"
+                    : "inline-flex h-10 items-center border-b-2 border-transparent px-3 font-medium text-muted-foreground transition-colors hover:text-foreground"
+                }
+              >
+                {item.label}
+              </Link>
+            </li>
+          ))}
+        </ul>
+      </nav>
     </header>
   );
 }
 
-function Hero() {
+function PageHeader() {
   return (
-    <section
-      aria-label="Edison Automation overview"
-      className="relative isolate overflow-hidden rounded-3xl"
-    >
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(70%_60%_at_50%_0%,rgba(245,158,11,0.10),transparent_70%)]"
-      />
-      <FadeRise>
-        <div className="flex flex-col gap-7 px-2 py-8 sm:py-12">
-          <div className="inline-flex w-fit items-center gap-2 rounded-full border border-amber-200/70 bg-amber-50/70 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-amber-700">
-            <span className="inline-block h-1.5 w-1.5 rounded-full bg-amber-500" />
-            Thomas A. Edison Papers
-          </div>
-          <h1 className="max-w-4xl text-4xl font-semibold leading-[1.05] tracking-[-0.03em] text-foreground sm:text-5xl md:text-6xl">
-            Automation workbench for transcription review and Omeka-ready indexing.
-          </h1>
-          <p className="max-w-2xl text-lg leading-8 text-muted-foreground">
-            Ingest Box files, extract pages, assign document IDs, grade transcription
-            confidence, and help reviewers correct archival text before public publication.
-          </p>
-          <div className="flex flex-wrap items-center gap-3">
-            <a
-              href="#queue-title"
-              className={buttonVariants({
-                size: "lg",
-                className: "gap-2 rounded-full px-5",
-              })}
-            >
+    <div className="flex flex-wrap items-end justify-between gap-4 border-b border-border pb-5">
+      <div className="min-w-0">
+        <nav aria-label="Breadcrumb" className="text-[12px] text-muted-foreground">
+          <ol className="flex items-center gap-1.5">
+            <li>
+              <Link href="/" className="hover:text-foreground hover:underline">
+                Home
+              </Link>
+            </li>
+            <li aria-hidden="true">/</li>
+            <li className="text-foreground" aria-current="page">
               Review queue
-              <ArrowRight className="h-4 w-4" strokeWidth={1.8} aria-hidden="true" />
-            </a>
-            <Badge
-              variant="secondary"
-              className="rounded-full border-border/70 bg-muted/70 px-3 py-1 text-xs font-medium text-muted-foreground"
-            >
-              Vercel + managed workers
-            </Badge>
-          </div>
-        </div>
-      </FadeRise>
-    </section>
+            </li>
+          </ol>
+        </nav>
+        <h1 className="mt-2 text-2xl font-semibold text-foreground">
+          Review queue
+        </h1>
+        <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
+          Ingest Box files, extract pages, assign document IDs, grade transcription
+          confidence, and correct archival text before public publication.
+        </p>
+      </div>
+      <Button variant="outline" size="sm" render={<a href="#review-title" />}>
+        Jump to workbench
+      </Button>
+    </div>
   );
 }
 
-const accentMap = {
-  amber: {
-    chip: "border-amber-200/70 bg-amber-50/80 text-amber-700",
-    rule: "bg-amber-500/80",
-  },
-  rose: {
-    chip: "border-rose-200/70 bg-rose-50/80 text-rose-700",
-    rule: "bg-rose-500/80",
-  },
-  emerald: {
-    chip: "border-emerald-200/70 bg-emerald-50/80 text-emerald-700",
-    rule: "bg-emerald-500/80",
-  },
-  neutral: {
-    chip: "border-border bg-muted/70 text-foreground/70",
-    rule: "bg-foreground/30",
-  },
-} as const;
-
-type QueueAccent = keyof typeof accentMap;
-
-function QueueCard({
-  icon: Icon,
-  label,
-  count,
-  detail,
-  accent,
+function SectionHeader({
+  id,
+  title,
+  caption,
 }: {
-  icon: LucideIcon;
+  id?: string;
+  title: string;
+  caption?: string;
+}) {
+  return (
+    <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
+      <h2 id={id} className="text-[15px] font-semibold text-foreground">
+        {title}
+      </h2>
+      {caption ? (
+        <p className="max-w-md text-[12px] text-muted-foreground">{caption}</p>
+      ) : null}
+    </div>
+  );
+}
+
+type MarkerTone = "rose" | "amber" | "neutral";
+
+interface StatCell {
   label: string;
   count: number;
-  detail: string;
-  accent: QueueAccent;
-}) {
-  const tone = accentMap[accent];
+  caption: string;
+  marker: MarkerTone;
+}
+
+const markerClass: Record<MarkerTone, string> = {
+  rose: "before:bg-rose-500",
+  amber: "before:bg-amber-500",
+  neutral: "before:bg-transparent",
+};
+
+function StatStrip({ cells }: { cells: StatCell[] }) {
   return (
-    <article className="group relative h-full overflow-hidden rounded-2xl border border-border/70 bg-card p-5 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_24px_-12px_rgba(0,0,0,0.08)] transition-all duration-300 ease-out hover:-translate-y-0.5 hover:border-border hover:shadow-[0_1px_2px_rgba(0,0,0,0.04),0_16px_40px_-16px_rgba(0,0,0,0.12)]">
-      <div className={`absolute inset-x-5 top-0 h-px ${tone.rule} opacity-60`} aria-hidden="true" />
-      <div className="flex items-start justify-between">
-        <div className={`rounded-xl border p-2 ${tone.chip}`}>
-          <Icon className="h-4.5 w-4.5" strokeWidth={1.5} aria-hidden="true" />
+    <div className="grid divide-y divide-border border border-border bg-card sm:grid-cols-2 sm:divide-y-0 lg:grid-cols-4 lg:divide-x">
+      {cells.map((cell, idx) => (
+        <div
+          key={cell.label}
+          className={
+            "relative px-5 py-4 before:absolute before:bottom-2 before:left-0 before:top-2 before:w-[2px] " +
+            markerClass[cell.marker] +
+            (idx > 0 ? " sm:border-t sm:border-border lg:border-t-0" : "")
+          }
+        >
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+            {cell.label}
+          </div>
+          <div className="mt-1 font-mono text-[28px] font-semibold tabular-nums text-foreground">
+            {cell.count}
+          </div>
+          <p className="mt-1 text-[12px] leading-snug text-muted-foreground">
+            {cell.caption}
+          </p>
         </div>
-        <span className="font-sans text-4xl font-semibold tabular-nums tracking-[-0.02em] text-foreground">
-          {count}
-        </span>
-      </div>
-      <h3 className="mt-5 text-base font-semibold tracking-[-0.01em] text-foreground">
-        {label}
-      </h3>
-      <p className="mt-1.5 text-sm leading-6 text-muted-foreground">{detail}</p>
-    </article>
+      ))}
+    </div>
   );
 }
