@@ -26,7 +26,11 @@ export const MAX_UPLOAD_BYTES = 250 * 1024 * 1024;
 export const DIRECT_INGEST_MAX_BYTES = 4 * 1024 * 1024;
 // Match @vercel/blob multipart part size; smaller files use a single PUT upload.
 export const BLOB_MULTIPART_THRESHOLD_BYTES = 8 * 1024 * 1024;
-export const BLOB_UPLOAD_TIMEOUT_MS = 120_000;
+// Give the @vercel/blob client enough budget to ride out transient retries
+// (it uses async-retry internally with exponential backoff). Smaller values
+// caused legitimate large-file uploads on slow connections to be aborted by
+// our wrapper before the underlying retry finished.
+export const BLOB_UPLOAD_TIMEOUT_MS = 300_000;
 
 const EXTENSION_TO_MIME: Record<string, string> = {
   pdf: "application/pdf",

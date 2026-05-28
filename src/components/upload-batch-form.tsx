@@ -20,13 +20,25 @@ import {
   shouldUseBlobMultipartUpload,
 } from "@/lib/edison/upload-constraints";
 
-type Status = "idle" | "uploading" | "processing" | "success" | "error";
+type Status =
+  | "idle"
+  | "uploading"
+  | "finalizing"
+  | "processing"
+  | "success"
+  | "error";
 
 interface UploadProgress {
   fileName: string;
   fileIndex: number;
   totalFiles: number;
+  // Monotonic 0-100 for the current file. We never let this go backwards so
+  // @vercel/blob's internal async-retry behavior doesn't show as a bouncing
+  // progress bar.
   percentage: number;
+  // 0-100 across the whole batch (uploaded bytes / total bytes).
+  batchPercentage: number;
+  retrying: boolean;
 }
 
 interface UploadBatchFormProps {
@@ -62,7 +74,10 @@ export function UploadBatchForm({ blobReady }: UploadBatchFormProps) {
     return map;
   }, [files]);
 
-  const busy = status === "uploading" || status === "processing";
+  const busy =
+    status === "uploading" ||
+    status === "finalizing" ||
+    status === "processing";
   const canDownload = Boolean(result && result.packages.length > 0);
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
@@ -103,6 +118,7 @@ export function UploadBatchForm({ blobReady }: UploadBatchFormProps) {
             promptTask,
             abortController.signal,
             setUploadProgress,
+            () => setStatus("finalizing"),
           )
         : await uploadFilesDirectly(
             files,
@@ -316,7 +332,13 @@ export function UploadBatchForm({ blobReady }: UploadBatchFormProps) {
             {status === "uploading" ? (
               <>
                 <Loader2 className="animate-spin" aria-hidden="true" />
-                Uploading{uploadProgress ? ` ${uploadProgress.percentage}%` : ""}
+                Uploading
+                {uploadProgress ? ` ${uploadProgress.batchPercentage}%` : ""}
+              </>
+            ) : status === "finalizing" ? (
+              <>
+                <Loader2 className="animate-spin" aria-hidden="true" />
+                Finalizing
               </>
             ) : status === "processing" ? (
               <>
@@ -362,7 +384,13 @@ export function UploadBatchForm({ blobReady }: UploadBatchFormProps) {
           ) : null}
         </div>
 
-        {uploadProgress ? <UploadProgressBar progress={uploadProgress} /> : null}
+        {(status === "uploading" || status === "finalizing") &&
+        uploadProgress ? (
+          <UploadProgressBar
+            progress={uploadProgress}
+            finalizing={status === "finalizing"}
+          />
+        ) : null}
         {ingestJob && status === "processing" ? (
           <FilePipelineTracker job={ingestJob} />
         ) : null}
@@ -406,27 +434,51 @@ export function UploadBatchForm({ blobReady }: UploadBatchFormProps) {
   );
 }
 
-function UploadProgressBar({ progress }: { progress: UploadProgress }) {
+function UploadProgressBar({
+  progress,
+  finalizing,
+}: {
+  progress: UploadProgress;
+  finalizing: boolean;
+}) {
+  const displayedBatchPercentage = finalizing ? 100 : progress.batchPercentage;
+  const hint = finalizing
+    ? "All files uploaded. Starting the transcription workflow…"
+    : progress.retrying
+      ? `Network hiccup — retrying ${progress.fileName}. The bar is intentionally held steady.`
+      : `${progress.fileName} · ${progress.percentage}%`;
+
   return (
     <div className="mt-4 rounded-md border border-border bg-muted/30 p-3 text-sm">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="font-medium text-foreground">
-          Uploading {progress.fileIndex} of {progress.totalFiles}:{" "}
-          {progress.fileName}
+          {finalizing
+            ? `Uploaded ${progress.totalFiles} file${progress.totalFiles === 1 ? "" : "s"}`
+            : `Uploading file ${progress.fileIndex} of ${progress.totalFiles}`}
         </p>
-        <p className="text-[12px] text-muted-foreground">
-          {progress.percentage}%
+        <p className="text-[12px] text-muted-foreground tabular-nums">
+          {displayedBatchPercentage}%
         </p>
       </div>
       <div className="mt-2 h-2 overflow-hidden rounded-full bg-background">
         <div
-          className="h-full rounded-full bg-primary transition-[width]"
-          style={{ width: `${progress.percentage}%` }}
+          className="h-full rounded-full bg-primary transition-[width] duration-300 ease-out"
+          style={{ width: `${displayedBatchPercentage}%` }}
         />
       </div>
+      <p
+        className={`mt-2 truncate text-[12px] ${progress.retrying ? "text-amber-700 dark:text-amber-400" : "text-muted-foreground"}`}
+      >
+        {hint}
+      </p>
     </div>
   );
 }
+
+// Treat a drop of this many percentage points as the @vercel/blob client
+// retrying internally (it uses async-retry, which restarts the body upload
+// on transient failures). Surfacing this avoids the perception of a hang.
+const RETRY_DETECT_DROP_THRESHOLD = 5;
 
 async function uploadFilesToBlob(
   files: File[],
@@ -434,6 +486,7 @@ async function uploadFilesToBlob(
   promptTask: PromptTask,
   signal: AbortSignal,
   onProgress: (progress: UploadProgress) => void,
+  onAllUploaded: () => void,
 ): Promise<IngestJobSnapshot> {
   const blobs: Array<{
     url: string;
@@ -442,13 +495,40 @@ async function uploadFilesToBlob(
     contentType: string;
   }> = [];
 
+  const totalBytes = files.reduce((sum, f) => sum + f.size, 0) || 1;
+  let bytesFromCompletedFiles = 0;
+
   for (const [index, file] of files.entries()) {
-    onProgress({
-      fileName: file.name,
-      fileIndex: index + 1,
-      totalFiles: files.length,
-      percentage: 0,
-    });
+    let maxPercentage = 0;
+    let lastRawPercentage = 0;
+    let retrying = false;
+
+    const emit = (rawPercentage: number) => {
+      const clamped = Math.max(0, Math.min(100, rawPercentage));
+      if (clamped + RETRY_DETECT_DROP_THRESHOLD < lastRawPercentage) {
+        retrying = true;
+      } else if (clamped >= maxPercentage) {
+        retrying = false;
+      }
+      lastRawPercentage = clamped;
+      maxPercentage = Math.max(maxPercentage, clamped);
+      const batchBytesSoFar =
+        bytesFromCompletedFiles + (file.size * maxPercentage) / 100;
+      const batchPercentage = Math.min(
+        100,
+        Math.round((batchBytesSoFar / totalBytes) * 100),
+      );
+      onProgress({
+        fileName: file.name,
+        fileIndex: index + 1,
+        totalFiles: files.length,
+        percentage: Math.round(maxPercentage),
+        batchPercentage,
+        retrying,
+      });
+    };
+
+    emit(0);
     const contentType = inferUploadContentType(file.name, file.type);
     const multipart = shouldUseBlobMultipartUpload(file.size);
     const result = await uploadWithTimeout(
@@ -459,17 +539,12 @@ async function uploadFilesToBlob(
         handleUploadUrl: "/api/blob/upload-token",
         contentType,
         multipart,
-        onUploadProgress: (progress) => {
-          onProgress({
-            fileName: file.name,
-            fileIndex: index + 1,
-            totalFiles: files.length,
-            percentage: Math.round(progress.percentage),
-          });
-        },
+        onUploadProgress: (progress) => emit(progress.percentage),
       },
       signal,
     );
+    bytesFromCompletedFiles += file.size;
+    emit(100);
     blobs.push({
       url: result.url,
       name: file.name,
@@ -478,6 +553,7 @@ async function uploadFilesToBlob(
     });
   }
 
+  onAllUploaded();
   const response = await fetch("/api/ingest/manual", {
     method: "POST",
     headers: { "content-type": "application/json" },
