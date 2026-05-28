@@ -1,5 +1,6 @@
 "use client";
 
+import { upload } from "@vercel/blob/client";
 import { Download, Loader2, Upload as UploadIcon } from "lucide-react";
 import { useId, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -25,7 +26,18 @@ const ACCEPTED_MIME = [
 
 const ACCEPT_ATTR = ACCEPTED_MIME.join(",");
 
-type Status = "idle" | "uploading" | "success" | "error";
+type Status = "idle" | "uploading" | "processing" | "success" | "error";
+
+async function safeReadJson(
+  response: Response,
+): Promise<unknown> {
+  const text = await response.text();
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { error: text.slice(0, 400) || `HTTP ${response.status}` };
+  }
+}
 
 interface PerFileRow {
   fileName: string;
@@ -57,22 +69,49 @@ export function UploadBatchForm() {
       return;
     }
 
+    const formData = new FormData(event.currentTarget);
+    const rawFolderId = formData.get("folderId");
+    const folderId =
+      typeof rawFolderId === "string" && rawFolderId.trim() !== ""
+        ? rawFolderId.trim()
+        : undefined;
+
     setStatus("uploading");
     setErrorMessage(null);
     setResult(null);
 
-    const formData = new FormData(event.currentTarget);
-    formData.delete("files");
-    for (const file of files) {
-      formData.append("files", file);
-    }
-
     try {
+      // Step 1: upload each file directly to Vercel Blob from the browser.
+      // This bypasses the 4.5 MB serverless function body limit.
+      const blobs = [] as Array<{
+        url: string;
+        name: string;
+        size: number;
+        contentType: string;
+      }>;
+      for (const file of files) {
+        const result = await upload(file.name, file, {
+          access: "public",
+          handleUploadUrl: "/api/blob/upload-token",
+          contentType: file.type || "application/octet-stream",
+        });
+        blobs.push({
+          url: result.url,
+          name: file.name,
+          size: file.size,
+          contentType: file.type || "application/octet-stream",
+        });
+      }
+
+      // Step 2: hand the blob refs to the ingest pipeline. The server fetches
+      // bytes from Blob, runs OCR + metadata extraction, and cleans up.
+      setStatus("processing");
       const response = await fetch("/api/ingest/manual", {
         method: "POST",
-        body: formData,
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ blobs, folderId }),
       });
-      const payload = (await response.json()) as
+      const payload = (await safeReadJson(response)) as
         | ManualIngestResult
         | { error?: string };
 
@@ -129,7 +168,9 @@ export function UploadBatchForm() {
         }),
       });
       if (!response.ok) {
-        const message = `Download failed with status ${response.status}.`;
+        const body = (await safeReadJson(response)) as { error?: string };
+        const message =
+          body?.error ?? `Download failed with status ${response.status}.`;
         toast.error("Download failed", { description: message });
         return;
       }
@@ -221,8 +262,16 @@ export function UploadBatchForm() {
         </div>
 
         <div className="mt-5 flex flex-wrap items-center gap-2">
-          <Button type="submit" disabled={status === "uploading"}>
+          <Button
+            type="submit"
+            disabled={status === "uploading" || status === "processing"}
+          >
             {status === "uploading" ? (
+              <>
+                <Loader2 className="animate-spin" aria-hidden="true" />
+                Uploading
+              </>
+            ) : status === "processing" ? (
               <>
                 <Loader2 className="animate-spin" aria-hidden="true" />
                 Transcribing
@@ -239,7 +288,7 @@ export function UploadBatchForm() {
               type="button"
               variant="outline"
               onClick={handleReset}
-              disabled={status === "uploading"}
+              disabled={status === "uploading" || status === "processing"}
             >
               Start new batch
             </Button>

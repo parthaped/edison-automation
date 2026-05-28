@@ -19,6 +19,7 @@ const nav: Array<{ label: string; href: string; active?: boolean }> = [
 export default function UploadPage() {
   const capabilities = getRuntimeCapabilities();
   const aiReady = capabilities.ai === "configured";
+  const blobReady = capabilities.files === "object-storage-configured";
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -36,6 +37,21 @@ export default function UploadPage() {
             <code className="font-mono"> .env.local</code> and restart the dev
             server to enable transcription and metadata extraction. Uploads will
             still be accepted, but transcriptions will be empty.
+          </div>
+        ) : null}
+
+        {!blobReady ? (
+          <div className="mt-3 border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            <strong className="font-semibold">
+              Vercel Blob is not configured.
+            </strong>{" "}
+            Set <code className="font-mono">BLOB_READ_WRITE_TOKEN</code> (create
+            a Blob store in the Vercel dashboard under{" "}
+            <strong>Storage</strong>) so files larger than 4 MB upload directly
+            to Blob instead of through the serverless function. Without it,
+            uploads of larger files will fail with{" "}
+            <code className="font-mono">Request Entity Too Large</code> on
+            Vercel.
           </div>
         ) : null}
 
