@@ -1,5 +1,6 @@
 import { generateText, Output } from "ai";
 import { z } from "zod";
+import { transcribeWithLocalOcr } from "./local-ocr";
 import { getActivePrompt, type TranscriptionPromptTask } from "./prompts";
 
 // Multimodal OCR / HTR and metadata extraction via the Vercel AI Gateway.
@@ -42,6 +43,10 @@ export function isTranscribableMediaType(mimeType: string): boolean {
 
 export function getDefaultOcrModel(env: NodeJS.ProcessEnv = process.env): string {
   return env.EDISON_OCR_MODEL ?? DEFAULT_OCR_MODEL;
+}
+
+function getLocalOcrUrl(env: NodeJS.ProcessEnv = process.env): string | undefined {
+  return env.EDISON_LOCAL_OCR_URL?.trim() || undefined;
 }
 
 function getRequestTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
@@ -161,6 +166,17 @@ export async function transcribeDocument(
 
   const model = input.model ?? getDefaultOcrModel();
   const activePrompt = getActivePrompt(input.promptTask ?? "diplomatic-transcription");
+
+  const localOcrUrl = getLocalOcrUrl();
+  if (localOcrUrl) {
+    const { signal, cleanup } = combineSignals(input.signal, getRequestTimeoutMs());
+    try {
+      return await transcribeWithLocalOcr(input, localOcrUrl, signal);
+    } finally {
+      cleanup();
+    }
+  }
+
   const mediaPart =
     mediaType === SUPPORTED_PDF_MIME_TYPE
       ? ({

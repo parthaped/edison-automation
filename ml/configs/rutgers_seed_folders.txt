@@ -1,0 +1,4 @@
+# One Edison Digital folder ID per line.
+# These are examples from the plan; expand this list as you choose corpus scope.
+D9623-F
+D9032-F
