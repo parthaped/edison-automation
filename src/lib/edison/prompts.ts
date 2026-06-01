@@ -12,11 +12,11 @@ export const PROMPT_LIBRARY: PromptVersion[] = [
     prompt: `These are the image files for Doc ID [provide ID]. It is in Folder ID [provide ID]. It is a [type of document]. Transcribe the text with the following format order: Letterhead, dateline, salutation, body of the text, closing text, signature, any annotations to the document. Use formatting from the original: paragraphing (without line breaks), punctuation, and underlining. If less than 70% confident of a word or phrase, put it in brackets with a question mark at the end. Put any annotations or marginal notes at the end. Handwritten marginal notes should be italicized and put in angle brackets <> with position indicated in square brackets []. Any lists or financial statements should be formatted as a table. Use each image name as a heading before its text.`,
   },
   {
-    id: "metadata-extraction-v2",
+    id: "metadata-extraction-v3",
     task: "metadata-extraction",
-    version: "2.0.0",
+    version: "3.0.0",
     active: true,
-    prompt: `Extract and list the following metadata from this document. Document type, Date in the format Year-Month-Day, Author(s), Recipient(s), Name Mentions that are not author(s) or recipient(s), primary general Subjects in short form; Image name(s). Put each element in a separate column. The first column will contain the Folder ID the second column will contain the Doc ID. The last column should include the image name(s). All names should be formatted with last name first, first and middle name or initials. If there are multiple entries in a column separate each with a semicolon.`,
+    prompt: `Index this document for the Dublin Core catalog used on edisondigital.rutgers.edu. Produce: a concise descriptive Title naming the principal correspondents or topic (do not repeat the Doc ID or Folder ID); the Document Type as a single lowercase term (correspondence, telegram, notebook page, ledger, memorandum, legal document, financial statement, drawing, printed material, or Unknown); the Date in ISO form Year-Month-Day (use Year-Month or Year when only partial, or Unknown); the Author(s) and Recipient(s) formatted last name first with first and middle name or initials; Name Mentions that are people, organizations, or places named in the body but are not the author or recipient; and one to six concrete topical Subjects drawn from the content. Base every field strictly on the document and leave it empty or Unknown rather than guessing. Separate multiple entries within a field with a semicolon.`,
   },
   {
     id: "project-notebook-v1",

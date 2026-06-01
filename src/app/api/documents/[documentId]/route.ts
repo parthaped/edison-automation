@@ -6,9 +6,15 @@ import { getEdisonService } from "@/lib/edison/service-factory";
 export const runtime = "nodejs";
 export const maxDuration = 30;
 
-const patchBodySchema = z.object({
-  diplomaticText: z.string(),
-});
+const patchBodySchema = z
+  .object({
+    diplomaticText: z.string().optional(),
+    status: z.literal("approved").optional(),
+  })
+  .refine(
+    (body) => body.diplomaticText !== undefined || body.status !== undefined,
+    { message: "Provide diplomaticText to edit or status to approve." },
+  );
 
 export async function PATCH(
   request: Request,
@@ -24,10 +30,14 @@ export async function PATCH(
       );
     }
 
-    const document = await getEdisonService().saveTranscriptionEdit(
-      documentId,
-      parsed.data.diplomaticText,
-    );
+    const service = getEdisonService();
+    const document =
+      parsed.data.status === "approved"
+        ? await service.approveDocument(documentId)
+        : await service.saveTranscriptionEdit(
+            documentId,
+            parsed.data.diplomaticText ?? "",
+          );
 
     return NextResponse.json({ document });
   } catch (error) {

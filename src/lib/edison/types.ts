@@ -76,6 +76,7 @@ export interface TranscriptionRun {
 export interface MetadataExtraction {
   folderId: string;
   documentId: string;
+  title: string;
   documentType: string;
   date: string;
   authors: string[];

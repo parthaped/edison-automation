@@ -151,26 +151,44 @@ describe("EdisonAutomationService", () => {
   it("refuses to export when no documents are approved", async () => {
     const service = new EdisonAutomationService(new InMemoryEdisonRepository(true));
 
-    await expect(service.exportOmekaCsv()).rejects.toMatchObject({
+    await expect(service.exportTranscriptionsCsv()).rejects.toMatchObject({
       code: "EXPORT_FAILED",
       status: 409,
     });
   });
 
-  it("exports only approved records to the Omeka CSV", async () => {
+  it("exports only approved records to the transcriptions CSV", async () => {
     const repository = new InMemoryEdisonRepository(true);
     const service = new EdisonAutomationService(repository);
-    const documents = await repository.listDocuments();
-    const target = documents.find((document) => document.documentId === "D9032-00001");
-    if (!target) {
-      throw new Error("Seed data must include D9032-00001 for this test.");
-    }
-    await repository.saveDocuments([{ ...target, status: "approved" }]);
 
-    const csv = await service.exportOmekaCsv();
+    const approved = await service.approveDocument("D9032-00001");
+    expect(approved.status).toBe("approved");
 
-    expect(csv).toContain("Folder ID,Doc ID");
+    const csv = await service.exportTranscriptionsCsv();
+
+    expect(csv.split("\n")[0]).toBe(
+      "Doc ID,Folder ID,Title,Document Type,Date,Author(s),Recipient(s),Name Mentions,Subjects,Image name(s),Confidence,Transcription",
+    );
+    expect(csv).toContain("D9032-00001");
     expect(csv).toContain("D9032-F");
+  });
+
+  it("refuses to approve a blocked document", async () => {
+    const repository = new InMemoryEdisonRepository(true);
+    const service = new EdisonAutomationService(repository);
+
+    await expect(
+      service.approveDocument("NEW-D8501-00003"),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST", status: 409 });
+  });
+
+  it("throws NOT_FOUND when approving an unknown document", async () => {
+    const service = new EdisonAutomationService(new InMemoryEdisonRepository(true));
+
+    await expect(service.approveDocument("does-not-exist")).rejects.toMatchObject({
+      code: "NOT_FOUND",
+      status: 404,
+    });
   });
 });
 
@@ -319,33 +337,37 @@ describe("mergeTranscribedMetadata", () => {
   const processed: MetadataExtraction = {
     folderId: "D9032-F",
     documentId: "D9032-00001",
+    title: "[D9032-00001]",
     documentType: "Unknown",
     date: "Unknown",
     authors: [],
     recipients: [],
     mentionedNames: [],
-    subjects: ["Needs review"],
+    subjects: [],
     imageNames: ["page.jpg"],
     confidence: "medium",
   };
 
-  it("preserves default subjects when AI returns an empty subjects array", () => {
+  it("falls back to the processed subjects when AI returns an empty array", () => {
     const merged = mergeTranscribedMetadata(processed, {
-      documentType: "letter",
+      title: "Marks to Edison",
+      documentType: "correspondence",
       date: "1890",
-      authors: ["Edison"],
+      authors: ["Edison, Thomas A."],
       recipients: [],
       mentionedNames: [],
       subjects: [],
     });
 
-    expect(merged.subjects).toEqual(["Needs review"]);
-    expect(merged.documentType).toBe("letter");
+    expect(merged.subjects).toEqual([]);
+    expect(merged.documentType).toBe("correspondence");
+    expect(merged.title).toBe("Marks to Edison");
   });
 
-  it("uses AI subjects when the model returned at least one", () => {
+  it("keeps the processed title when the model returns no title", () => {
     const merged = mergeTranscribedMetadata(processed, {
-      documentType: "letter",
+      title: "",
+      documentType: "correspondence",
       date: "1890",
       authors: [],
       recipients: [],
@@ -353,6 +375,7 @@ describe("mergeTranscribedMetadata", () => {
       subjects: ["Electric light"],
     });
 
+    expect(merged.title).toBe("[D9032-00001]");
     expect(merged.subjects).toEqual(["Electric light"]);
   });
 });

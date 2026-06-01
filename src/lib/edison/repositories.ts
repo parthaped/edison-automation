@@ -6,6 +6,7 @@ import type {
 
 export interface DashboardSummary {
   total: number;
+  highConfidence: number;
   lowConfidence: number;
   mediumConfidence: number;
   blocked: number;
@@ -53,6 +54,9 @@ export interface EdisonRepository {
     documentId: string,
     diplomaticText: string,
   ): Promise<DocumentPackage | null>;
+  // Marks a document approved so it is included in the transcriptions CSV
+  // export. Returns the updated package, or null when the document is unknown.
+  approveDocument(documentId: string): Promise<DocumentPackage | null>;
   getReviewCase(documentId?: string): Promise<ReviewCase | null>;
   listApprovedExportRows(): Promise<
     Array<{
@@ -74,6 +78,7 @@ export function summarizeDocuments(
 ): DashboardSummary {
   return {
     total: documents.length,
+    highConfidence: documents.filter((document) => document.confidence === "high").length,
     lowConfidence: documents.filter((document) => document.confidence === "low").length,
     mediumConfidence: documents.filter((document) => document.confidence === "medium").length,
     blocked: documents.filter((document) => document.status === "blocked").length,
@@ -97,6 +102,7 @@ export function emptyMetadata(document: DocumentPackage): MetadataExtraction {
   return {
     folderId: document.folderId,
     documentId: document.documentId,
+    title: document.title,
     documentType: "Unknown",
     date: "Unknown",
     authors: [],

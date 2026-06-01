@@ -57,22 +57,22 @@ describe("scoreConfidence", () => {
       pageCount: 0,
       extractionErrors: 0,
       uncertainReadings: 0,
-      modelDisagreements: 0,
+      wordCount: 0,
       ocrTextLength: 0,
     });
     expect(result.bucket).toBe("blocked");
   });
 
-  it("penalizes uncertain readings", () => {
+  it("penalizes a high density of uncertain readings", () => {
     const result = scoreConfidence({
       pageCount: 2,
       extractionErrors: 0,
       uncertainReadings: 5,
-      modelDisagreements: 0,
+      wordCount: 80,
       ocrTextLength: 1000,
     });
     expect(result.bucket === "medium" || result.bucket === "low").toBe(true);
-    expect(result.reasons.join(" ")).toMatch(/uncertain readings/);
+    expect(result.reasons.join(" ")).toMatch(/uncertain reading/);
   });
 
   it("returns high confidence for clean extractions", () => {
@@ -80,7 +80,7 @@ describe("scoreConfidence", () => {
       pageCount: 2,
       extractionErrors: 0,
       uncertainReadings: 0,
-      modelDisagreements: 0,
+      wordCount: 400,
       ocrTextLength: 2000,
     });
     expect(result.bucket).toBe("high");
@@ -88,22 +88,24 @@ describe("scoreConfidence", () => {
 });
 
 describe("mergeTranscribedMetadata (persist step)", () => {
-  it("keeps default subjects when transcribed metadata is empty", () => {
+  it("leaves subjects empty when transcribed metadata has none", () => {
     const merged = mergeTranscribedMetadata(
       {
         folderId: "D9032-F",
         documentId: "D9032-00001",
+        title: "[D9032-00001]",
         documentType: "Unknown",
         date: "Unknown",
         authors: [],
         recipients: [],
         mentionedNames: [],
-        subjects: ["Needs review"],
+        subjects: [],
         imageNames: [],
         confidence: "medium",
       },
       {
-        documentType: "letter",
+        title: "Marks to Edison",
+        documentType: "correspondence",
         date: "1890",
         authors: [],
         recipients: [],
@@ -112,7 +114,8 @@ describe("mergeTranscribedMetadata (persist step)", () => {
       },
     );
 
-    expect(merged.subjects).toEqual(["Needs review"]);
+    expect(merged.subjects).toEqual([]);
+    expect(merged.title).toBe("Marks to Edison");
   });
 });
 

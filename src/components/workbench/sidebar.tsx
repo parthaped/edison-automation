@@ -117,7 +117,7 @@ export function WorkbenchSidebar() {
 
       <div className="border-t border-sidebar-border p-2">
         <a
-          href="/api/export/omeka"
+          href="/api/export/transcriptions"
           className="flex items-center gap-2 rounded-md px-2.5 py-2 text-[13px] font-medium text-sidebar-foreground transition-colors hover:bg-sidebar-accent"
         >
           <Download
@@ -125,7 +125,7 @@ export function WorkbenchSidebar() {
             strokeWidth={1.8}
             aria-hidden="true"
           />
-          Download Omeka CSV
+          Download CSV
         </a>
         <p className="px-2.5 pb-1 pt-2 text-[10px] uppercase tracking-wide text-muted-foreground">
           Rutgers University · Internal

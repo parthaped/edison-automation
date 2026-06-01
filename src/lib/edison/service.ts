@@ -1,7 +1,8 @@
 import { AppError } from "./app-error";
 import { buildAuditTrail, type AuditEvent } from "./audit";
+import { extractUncertainReadings, gradeTranscription } from "./confidence";
 import { createDocumentPackage } from "./extraction";
-import { buildOmekaCsv, buildOmekaCsvRow } from "./omeka-export";
+import { buildExportCsv, buildExportCsvRow } from "./export-csv";
 import { getActivePrompt } from "./prompts";
 import type { TranscribedMetadata } from "./transcribe";
 import type {
@@ -83,68 +84,9 @@ export interface ProcessSourceFileResult {
   confidenceReasons: string[];
 }
 
-interface ConfidenceInput {
-  pageCount: number;
-  extractionErrors: number;
-  uncertainReadings: number;
-  modelDisagreements: number;
-  ocrTextLength: number;
-}
-
-interface ConfidenceResult {
-  bucket: ConfidenceBucket;
-  score: number;
-  reasons: string[];
-}
-
-export function scoreConfidence(input: ConfidenceInput): ConfidenceResult {
-  const reasons: string[] = [];
-
-  if (input.extractionErrors > 0 || input.pageCount === 0) {
-    return {
-      bucket: "blocked",
-      score: 0,
-      reasons: ["Extraction failed or produced no reviewable pages."],
-    };
-  }
-
-  let score = 100;
-
-  if (input.ocrTextLength < 80) {
-    score -= 25;
-    reasons.push("OCR text is very short for the extracted page count.");
-  }
-
-  if (input.uncertainReadings > 0) {
-    const penalty = Math.min(30, input.uncertainReadings * 4);
-    score -= penalty;
-    reasons.push(`${input.uncertainReadings} uncertain readings need review.`);
-  }
-
-  if (input.modelDisagreements > 0) {
-    const penalty = Math.min(25, input.modelDisagreements * 8);
-    score -= penalty;
-    reasons.push(`${input.modelDisagreements} model disagreements were detected.`);
-  }
-
-  if (input.pageCount > 20) {
-    score -= 5;
-    reasons.push("Large document packages receive extra review scrutiny.");
-  }
-
-  const bucket: ConfidenceBucket =
-    score >= 85 ? "high" : score >= 55 ? "medium" : "low";
-
-  return {
-    bucket,
-    score: Math.max(0, score),
-    reasons: reasons.length > 0 ? reasons : ["Clean extraction and low uncertainty."],
-  };
-}
-
-function extractUncertainReadings(text: string): string[] {
-  return [...new Set(text.match(/\[[^\]]+\?\]/g) ?? [])];
-}
+// Re-exported so existing call sites and tests can keep importing the grader
+// from the service module; the implementation lives in ./confidence.
+export { scoreConfidence } from "./confidence";
 
 export function resolvePersistedDocumentStatus(
   documentPackage: DocumentPackage,
@@ -164,6 +106,7 @@ export function mergeTranscribedMetadata(
   }
   return {
     ...processed,
+    title: transcribed.title?.trim() || processed.title,
     documentType: transcribed.documentType || "Unknown",
     date: transcribed.date || "Unknown",
     authors: transcribed.authors,
@@ -217,12 +160,11 @@ export async function processSourceFile(
   const rawOcrText = input.rawOcrText ?? "";
   const cleanedText = rawOcrText.trim();
   const uncertainReadings = blocked ? [] : extractUncertainReadings(cleanedText);
-  const confidenceResult = scoreConfidence({
+  const confidenceResult = gradeTranscription({
     pageCount: packageWithUrls.pages.length,
-    extractionErrors: blocked ? 1 : 0,
+    blocked,
+    text: cleanedText,
     uncertainReadings: uncertainReadings.length,
-    modelDisagreements: 0,
-    ocrTextLength: cleanedText.length,
   });
 
   const documentPackage: DocumentPackage = {
@@ -244,12 +186,13 @@ export async function processSourceFile(
   const metadata: MetadataExtraction = {
     folderId: documentPackage.folderId,
     documentId: documentPackage.documentId,
+    title: documentPackage.title,
     documentType: "Unknown",
     date: "Unknown",
     authors: [],
     recipients: [],
     mentionedNames: [],
-    subjects: blocked ? [] : ["Needs review"],
+    subjects: [],
     imageNames: documentPackage.pages.map((page) => page.imageFilename),
     confidence: confidenceResult.bucket,
   };
@@ -313,6 +256,26 @@ export class EdisonAutomationService {
     return updated;
   }
 
+  async approveDocument(documentId: string) {
+    const record = await this.repository.getDocumentRecord(documentId);
+    if (!record) {
+      throw new AppError("NOT_FOUND", "Document was not found.", 404);
+    }
+    if (record.document.status === "blocked") {
+      throw new AppError(
+        "BAD_REQUEST",
+        "Blocked documents cannot be approved for export.",
+        409,
+      );
+    }
+
+    const updated = await this.repository.approveDocument(documentId);
+    if (!updated) {
+      throw new AppError("NOT_FOUND", "Document was not found.", 404);
+    }
+    return updated;
+  }
+
   async buildBatchExportFromPayload(
     payload: BatchExportPayload,
   ): Promise<{ bytes: Uint8Array; fileName: string; documentCount: number }> {
@@ -343,7 +306,7 @@ export class EdisonAutomationService {
     return buildBatchZip(rows);
   }
 
-  async exportOmekaCsv(): Promise<string> {
+  async exportTranscriptionsCsv(): Promise<string> {
     const rows = await this.repository.listApprovedExportRows();
     if (rows.length === 0) {
       throw new AppError(
@@ -353,8 +316,8 @@ export class EdisonAutomationService {
       );
     }
 
-    return buildOmekaCsv(
-      rows.map((row) => buildOmekaCsvRow(row.metadata, row.transcription)),
+    return buildExportCsv(
+      rows.map((row) => buildExportCsvRow(row.metadata, row.transcription)),
     );
   }
 }
@@ -370,8 +333,8 @@ async function buildBatchZip(rows: BatchExportRow[]): Promise<{
 
   zip.file(
     "index.csv",
-    buildOmekaCsv(
-      rows.map((row) => buildOmekaCsvRow(row.metadata, row.transcription)),
+    buildExportCsv(
+      rows.map((row) => buildExportCsvRow(row.metadata, row.transcription)),
     ),
   );
   zip.file(
@@ -403,7 +366,7 @@ async function buildBatchZip(rows: BatchExportRow[]): Promise<{
       `Documents: ${rows.length}`,
       "",
       "Files:",
-      "- index.csv             Omeka-compatible CSV index",
+      "- index.csv             CSV index of transcriptions and metadata",
       "- manifest.json         Full structured metadata + transcription JSON",
       "- <documentId>/         Per-document folder",
       "    transcription.txt   Diplomatic transcription as plain text",

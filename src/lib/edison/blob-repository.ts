@@ -1,4 +1,5 @@
 import { list, put } from "@vercel/blob";
+import { extractUncertainReadings, gradeTranscription } from "./confidence";
 import type {
   DocumentRecord,
   DocumentRecords,
@@ -180,8 +181,22 @@ export class BlobEdisonRepository implements EdisonRepository {
     const record = await this.readRecord(documentId);
     if (!record) return null;
 
+    const uncertainReadings = extractUncertainReadings(diplomaticText);
+    // Re-grade so the stored confidence reflects the edited text instead of
+    // the original AI output.
+    const confidence =
+      record.document.status === "blocked"
+        ? record.document.confidence
+        : gradeTranscription({
+            pageCount: record.document.pages.length,
+            blocked: false,
+            text: diplomaticText,
+            uncertainReadings: uncertainReadings.length,
+          }).bucket;
+
     const document: DocumentPackage = {
       ...record.document,
+      confidence,
       updatedAt: new Date().toISOString(),
     };
     await this.writeRecord({
@@ -189,8 +204,25 @@ export class BlobEdisonRepository implements EdisonRepository {
       transcription: {
         ...record.transcription,
         diplomaticText,
-        uncertainReadings: diplomaticText.match(/\[[^\]]+\?\]/g) ?? [],
+        uncertainReadings,
       },
+      metadata: { ...record.metadata, confidence },
+    });
+    return document;
+  }
+
+  async approveDocument(documentId: string): Promise<DocumentPackage | null> {
+    const record = await this.readRecord(documentId);
+    if (!record) return null;
+
+    const document: DocumentPackage = {
+      ...record.document,
+      status: "approved",
+      updatedAt: new Date().toISOString(),
+    };
+    await this.writeRecord({
+      document,
+      transcription: record.transcription,
       metadata: record.metadata,
     });
     return document;

@@ -2,12 +2,14 @@
 
 import {
   AlertTriangle,
+  Check,
   ChevronLeft,
   ChevronRight,
   ExternalLink,
 } from "lucide-react";
 import Link from "next/link";
 import { useMemo, useState } from "react";
+import { toast } from "sonner";
 import { DocumentViewer } from "@/components/document-viewer";
 import { Button } from "@/components/ui/button";
 import type {
@@ -47,6 +49,7 @@ function emptyMetadata(document: DocumentPackage): MetadataExtraction {
   return {
     folderId: document.folderId,
     documentId: document.documentId,
+    title: document.title,
     documentType: "Unknown",
     date: "Unknown",
     authors: [],
@@ -69,6 +72,8 @@ export function ReviewerWorkbench({
     documents.findIndex((doc) => doc.documentId === initialDocumentId),
   );
   const [activeIndex, setActiveIndex] = useState(initialIndex);
+  const [approvedIds, setApprovedIds] = useState<Set<string>>(new Set());
+  const [approving, setApproving] = useState(false);
 
   const activeDocument = documents[activeIndex] ?? documents[0];
 
@@ -95,6 +100,50 @@ export function ReviewerWorkbench({
   function goToDocument(index: number) {
     const next = Math.max(0, Math.min(index, documents.length - 1));
     setActiveIndex(next);
+  }
+
+  const isApproved =
+    activeDocument.status === "approved" ||
+    approvedIds.has(activeDocument.documentId);
+  const isBlocked = activeDocument.status === "blocked";
+  const effectiveStatus = isApproved ? "approved" : activeDocument.status;
+
+  async function handleApprove() {
+    if (approving || isApproved || isBlocked) return;
+    setApproving(true);
+    try {
+      const response = await fetch(
+        `/api/documents/${encodeURIComponent(activeDocument.documentId)}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status: "approved" }),
+        },
+      );
+      if (!response.ok) {
+        const data = (await response.json().catch(() => null)) as
+          | { error?: { message?: string } }
+          | null;
+        throw new Error(
+          data?.error?.message ?? `Approval failed (${response.status}).`,
+        );
+      }
+      setApprovedIds((prev) => {
+        const next = new Set(prev);
+        next.add(activeDocument.documentId);
+        return next;
+      });
+      toast.success("Document approved for export.");
+      if (activeIndex < documents.length - 1) {
+        goToDocument(activeIndex + 1);
+      }
+    } catch (error) {
+      toast.error("Could not approve document", {
+        description: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      setApproving(false);
+    }
   }
 
   return (
@@ -129,6 +178,15 @@ export function ReviewerWorkbench({
             <ExternalLink className="h-3.5 w-3.5" strokeWidth={1.8} aria-hidden="true" />
             Open standalone
           </Button>
+          <Button
+            type="button"
+            size="sm"
+            onClick={handleApprove}
+            disabled={approving || isApproved || isBlocked}
+          >
+            <Check className="h-3.5 w-3.5" strokeWidth={1.8} aria-hidden="true" />
+            {isApproved ? "Approved" : approving ? "Approving…" : "Approve"}
+          </Button>
           <NavButton
             direction="prev"
             onClick={() => goToDocument(activeIndex - 1)}
@@ -143,7 +201,7 @@ export function ReviewerWorkbench({
       </header>
 
       <div className="border-b border-border px-5 py-4">
-        <InfoBar document={activeDocument} />
+        <InfoBar document={activeDocument} status={effectiveStatus} />
       </div>
 
       <div className="border-b border-border bg-muted/40 p-3">
@@ -245,8 +303,14 @@ function NavButton({
   );
 }
 
-function InfoBar({ document }: { document: DocumentPackage }) {
-  const statusLabel = document.status.replaceAll("_", " ");
+function InfoBar({
+  document,
+  status,
+}: {
+  document: DocumentPackage;
+  status: DocumentPackage["status"];
+}) {
+  const statusLabel = status.replaceAll("_", " ");
   return (
     <dl className="grid grid-cols-2 gap-y-3 text-sm md:grid-cols-4 md:gap-y-0 md:divide-x md:divide-border">
       <InfoCell label="Folder ID" value={document.folderId} mono />
@@ -307,6 +371,7 @@ function InfoCell({
 function MetadataRows({ metadata }: { metadata: MetadataExtraction }) {
   const rows = useMemo(
     () => [
+      { label: "Title", value: metadata.title },
       { label: "Date", value: metadata.date },
       { label: "Document type", value: metadata.documentType },
       { label: "Authors", value: metadata.authors.join("; ") },

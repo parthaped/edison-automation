@@ -1,3 +1,4 @@
+import { extractUncertainReadings, gradeTranscription } from "./confidence";
 import { sampleDocuments, sampleMetadata, sampleTranscription } from "./sample-data";
 import type {
   DocumentRecord,
@@ -113,14 +114,47 @@ export class InMemoryEdisonRepository implements EdisonRepository {
 
     const existing =
       this.transcriptions.get(documentId) ?? emptyTranscription(documentId);
+    const uncertainReadings = extractUncertainReadings(diplomaticText);
     this.transcriptions.set(documentId, {
       ...existing,
       diplomaticText,
-      uncertainReadings: diplomaticText.match(/\[[^\]]+\?\]/g) ?? [],
+      uncertainReadings,
     });
+
+    // Re-grade so the stored confidence reflects the edited text instead of
+    // the original AI output.
+    const confidence =
+      document.status === "blocked"
+        ? document.confidence
+        : gradeTranscription({
+            pageCount: document.pages.length,
+            blocked: false,
+            text: diplomaticText,
+            uncertainReadings: uncertainReadings.length,
+          }).bucket;
 
     const updated: DocumentPackage = {
       ...document,
+      confidence,
+      updatedAt: new Date().toISOString(),
+    };
+    this.documents.set(documentId, updated);
+
+    const metadata = this.metadata.get(documentId);
+    if (metadata) {
+      this.metadata.set(documentId, { ...metadata, confidence });
+    }
+
+    return updated;
+  }
+
+  async approveDocument(documentId: string): Promise<DocumentPackage | null> {
+    const document = this.documents.get(documentId);
+    if (!document) return null;
+
+    const updated: DocumentPackage = {
+      ...document,
+      status: "approved",
       updatedAt: new Date().toISOString(),
     };
     this.documents.set(documentId, updated);
