@@ -113,6 +113,31 @@ input {
     font-size: 14px;
     line-height: 1.55;
   }
+
+  /* Windows / classic-style scrollbars render small up/down arrow buttons at
+   * the ends of the track. On polling pages (e.g. the upload pipeline tracker)
+   * the scrollbar can toggle on and off as content height fluctuates, which
+   * makes those arrows flicker. Hide them everywhere — we never want them. */
+  ::-webkit-scrollbar-button,
+  ::-webkit-scrollbar-button:start,
+  ::-webkit-scrollbar-button:end,
+  ::-webkit-scrollbar-button:vertical:start,
+  ::-webkit-scrollbar-button:vertical:end,
+  ::-webkit-scrollbar-button:horizontal:start,
+  ::-webkit-scrollbar-button:horizontal:end {
+    display: none;
+    width: 0;
+    height: 0;
+  }
+
+  /* Reserve scrollbar space so the layout doesn't shift (and the scrollbar
+   * itself doesn't pop in and out) when content height changes during live
+   * updates such as the ingest job poll. */
+  html,
+  body,
+  main {
+    scrollbar-gutter: stable;
+  }
 }
 
 @utility surface-elevated {
