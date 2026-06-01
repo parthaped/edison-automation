@@ -29,6 +29,17 @@ DEFAULT_USER_AGENT = (
     "Mozilla/5.0 (compatible; edison-automation-iiif-harvester/0.1; "
     "+https://github.com/parthaped/edison-automation)"
 )
+TRANSCRIPT_LABELS = {
+    "abstract",
+    "body",
+    "description",
+    "editor's notes",
+    "editors notes",
+    "full text",
+    "text",
+    "transcript",
+    "transcription",
+}
 
 DOCUMENT_FIELDS = [
     "document_id",
@@ -47,6 +58,8 @@ DOCUMENT_FIELDS = [
     "archive_url",
     "local_image_dir",
     "transcript_status",
+    "transcript_source",
+    "transcript_path",
     "split",
     "notes",
 ]
@@ -61,6 +74,7 @@ class HarvestConfig:
     user_agent: str
     download_images: bool
     raw_dir: Path
+    transcripts_dir: Path
 
 
 def parse_args() -> argparse.Namespace:
@@ -70,6 +84,11 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=Path("ml/configs/rutgers_seed_folders.txt"),
         help="Text file containing folder IDs or document IDs, one per line.",
+    )
+    parser.add_argument(
+        "--no-seed-file",
+        action="store_true",
+        help="Ignore the default seed file and use only --seed values.",
     )
     parser.add_argument(
         "--seed",
@@ -100,6 +119,12 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=Path("ml/data/raw"),
         help="Local image path root used in page inventory rows.",
+    )
+    parser.add_argument(
+        "--transcripts-dir",
+        type=Path,
+        default=Path("ml/data/transcripts"),
+        help="Directory for transcript candidates extracted from IIIF metadata.",
     )
     parser.add_argument(
         "--download-images",
@@ -207,6 +232,41 @@ def metadata_map(manifest: dict[str, Any]) -> dict[str, str]:
     return result
 
 
+def transcript_candidate(manifest: dict[str, Any]) -> tuple[str, str]:
+    """Return the best transcript-like metadata value and its source label.
+
+    Edison Digital manifests are not uniform: some documents expose human text as
+    "Editor's Notes" or "Abstract" while others only contain descriptive metadata.
+    We keep these candidates as document-level transcript drafts for later PAGE
+    XML alignment rather than treating them as line-level ground truth.
+    """
+    for item in manifest.get("metadata", []):
+        label = strip_html(item.get("label"))
+        normalized = label.lower()
+        if normalized in TRANSCRIPT_LABELS:
+            value = strip_html(item.get("value"))
+            if value:
+                return value, label
+    return "", ""
+
+
+def write_transcript_candidate(
+    manifest: dict[str, Any],
+    document_id: str,
+    transcripts_dir: Path,
+) -> tuple[str, str, str]:
+    transcript_path = transcripts_dir / f"{document_id}.txt"
+    if transcript_path.exists():
+        return "available", "local:existing", str(transcript_path).replace("\\", "/")
+
+    text, source = transcript_candidate(manifest)
+    if not text:
+        return "missing", "", ""
+    transcripts_dir.mkdir(parents=True, exist_ok=True)
+    transcript_path.write_text(text.rstrip() + "\n", encoding="utf-8")
+    return "available", f"iiif:{source}", str(transcript_path).replace("\\", "/")
+
+
 def extract_href(value: Any) -> str:
     text = html.unescape(str(value or ""))
     match = re.search(r'href="([^"]+)"', text)
@@ -273,6 +333,7 @@ def document_row(
     manifest_url: str,
     pages: list[dict[str, Any]],
     raw_dir: Path,
+    transcripts_dir: Path,
 ) -> dict[str, str]:
     meta = metadata_map(manifest)
     document_id = meta.get("document id") or document_id_from_manifest_url(manifest_url)
@@ -282,6 +343,11 @@ def document_row(
     source_url = metadata_href(manifest, "URL") or f"{BASE_URL}/document/{document_id}"
     archive_url = metadata_href(manifest, "Has Version")
     local_image_dir = str(raw_dir / document_id).replace("\\", "/")
+    transcript_status, transcript_source, transcript_path = write_transcript_candidate(
+        manifest,
+        document_id,
+        transcripts_dir,
+    )
     return {
         "document_id": document_id,
         "folder_id": folder_id,
@@ -298,7 +364,9 @@ def document_row(
         "source_url": source_url,
         "archive_url": archive_url,
         "local_image_dir": local_image_dir,
-        "transcript_status": "missing",
+        "transcript_status": transcript_status,
+        "transcript_source": transcript_source,
+        "transcript_path": transcript_path,
         "split": classify_split(document_id),
         "notes": "",
     }
@@ -371,7 +439,15 @@ def harvest(seeds: list[str], config: HarvestConfig) -> tuple[list[dict[str, str
         if config.download_images:
             for page in pages:
                 download_binary(page["image_url"], Path(page["local_path"]), config)
-        document_rows.append(document_row(payload, manifest_url, pages, config.raw_dir))
+        document_rows.append(
+            document_row(
+                payload,
+                manifest_url,
+                pages,
+                config.raw_dir,
+                config.transcripts_dir,
+            )
+        )
         all_page_rows.extend(pages)
 
     document_rows.sort(key=lambda row: row["document_id"])
@@ -393,7 +469,8 @@ def write_outputs(documents: list[dict[str, str]], pages: list[dict[str, Any]], 
 
 def main() -> int:
     args = parse_args()
-    seeds = read_seeds(args.seed_file, args.seed)
+    seed_file = Path("__missing_seed_file__") if args.no_seed_file else args.seed_file
+    seeds = read_seeds(seed_file, args.seed)
     if not seeds:
         print("No seeds provided. Add folder/document IDs with --seed-file or --seed.", file=sys.stderr)
         return 2
@@ -406,6 +483,7 @@ def main() -> int:
         user_agent=args.user_agent,
         download_images=args.download_images,
         raw_dir=args.raw_dir,
+        transcripts_dir=args.transcripts_dir,
     )
     documents, pages = harvest(seeds, config)
     write_outputs(documents, pages, config)

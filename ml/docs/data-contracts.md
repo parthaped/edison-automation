@@ -7,10 +7,20 @@ These contracts keep the Rutgers harvester, human transcript alignment, model tr
 One row per Edison document.
 
 ```csv
-document_id,folder_id,title,date,document_type,authors,mentioned_names,subjects,page_count,rights,license,iiif_manifest_url,source_url,archive_url,local_image_dir,transcript_status,split,notes
+document_id,folder_id,title,date,document_type,authors,mentioned_names,subjects,page_count,rights,license,iiif_manifest_url,source_url,archive_url,local_image_dir,transcript_status,transcript_source,transcript_path,split,notes
 ```
 
 Required fields are `document_id`, `folder_id`, `title`, `page_count`, `iiif_manifest_url`, and `source_url`.
+
+When transcript-like text is present in the IIIF metadata, the harvester writes
+it to `ml/data/transcripts/<document_id>.txt` and sets:
+
+- `transcript_status`: `available`
+- `transcript_source`: metadata source such as `iiif:Editor's Notes`
+- `transcript_path`: local path to the extracted transcript candidate
+
+If no transcript candidate is present, `transcript_status` is `missing` and the
+source/path fields are blank.
 
 ## Page Inventory JSONL
 
@@ -29,6 +39,10 @@ document_id,folder_id,source_path,source_mime,page_count,transcript_path,transcr
 ```
 
 Use `transcript_granularity` values `missing`, `document`, `page`, `line`, or `region`.
+
+Extracted IIIF transcript candidates are usually document-level. They are useful
+for selecting and aligning documents, but they are not line-level recognizer
+labels until PAGE XML/ALTO regions and `TextLine` entries have been created.
 
 ## Line-Crop JSONL
 
