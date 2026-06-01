@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { upload } from "@vercel/blob/client";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
