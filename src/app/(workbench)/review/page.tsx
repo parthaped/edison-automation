@@ -16,8 +16,7 @@ interface ReviewPageProps {
 export default async function ReviewPage({ searchParams }: ReviewPageProps) {
   const { doc } = await searchParams;
   const service = getEdisonService();
-  const { summary } = await service.getDashboard();
-  const reviewCase = await service.getReviewCase(doc);
+  const { summary, reviewCase } = await service.getReviewWorkbench(doc);
 
   return (
     <>

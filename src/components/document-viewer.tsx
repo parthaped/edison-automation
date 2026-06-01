@@ -30,7 +30,6 @@ import {
   type FormEvent,
   type KeyboardEvent,
   type PointerEvent as ReactPointerEvent,
-  type WheelEvent as ReactWheelEvent,
 } from "react";
 import { toast } from "sonner";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -47,7 +46,7 @@ import type { DocumentPackage, PageImage, TranscriptionRun } from "@/lib/edison/
 export interface DocumentViewerProps {
   document: DocumentPackage;
   transcription: TranscriptionRun;
-  onTranscriptionChange?: (text: string) => void;
+  initialPage?: number;
   className?: string;
 }
 
@@ -57,18 +56,27 @@ const ZOOM_MIN = 0.5;
 const ZOOM_MAX = 4;
 const ZOOM_STEP = 0.25;
 
+function clampPageIndex(index: number, pageCount: number): number {
+  if (pageCount <= 0) return 0;
+  return Math.min(Math.max(index, 0), pageCount - 1);
+}
+
 export function DocumentViewer({
   document,
   transcription,
-  onTranscriptionChange,
+  initialPage = 0,
   className,
 }: DocumentViewerProps) {
   const pages = document.pages;
   const pageCount = pages.length;
   const hasPages = pageCount > 0;
 
-  const [activePage, setActivePage] = useState(0);
-  const [pageInput, setPageInput] = useState("1");
+  const [activePage, setActivePage] = useState(() =>
+    clampPageIndex(initialPage, pageCount),
+  );
+  const [pageInput, setPageInput] = useState(() =>
+    String(clampPageIndex(initialPage, pageCount) + 1),
+  );
   const [viewLayout, setViewLayout] = useState<ViewLayout>("single");
   const [zoom, setZoom] = useState(1);
   const [rotation, setRotation] = useState(0);
@@ -80,6 +88,7 @@ export function DocumentViewer({
   const [savedText, setSavedText] = useState(transcription.diplomaticText);
   const [saving, setSaving] = useState(false);
   const [lastTranscriptionId, setLastTranscriptionId] = useState(transcription.id);
+  const [lastDocumentId, setLastDocumentId] = useState(document.documentId);
   const [lastActivePage, setLastActivePage] = useState(activePage);
 
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -95,12 +104,21 @@ export function DocumentViewer({
     setSavedText(transcription.diplomaticText);
   }
 
-  if (lastActivePage !== activePage) {
-    setLastActivePage(activePage);
-    setPageInput(String(activePage + 1));
+  if (lastDocumentId !== document.documentId) {
+    setLastDocumentId(document.documentId);
+    const nextPage = clampPageIndex(initialPage, pageCount);
+    setActivePage(nextPage);
+    setLastActivePage(nextPage);
+    setPageInput(String(nextPage + 1));
     setZoom(1);
     setPan({ x: 0, y: 0 });
     setRotation(0);
+  }
+
+  if (lastActivePage !== activePage) {
+    setLastActivePage(activePage);
+    setPageInput(String(activePage + 1));
+    setPan({ x: 0, y: 0 });
   }
 
   useEffect(() => {
@@ -116,6 +134,11 @@ export function DocumentViewer({
       ta.scrollTop = targetTop;
     }
   }, [activePage, pageCount, editedText.length]);
+
+  // Settings are inapplicable in grid mode (no zoom/rotate). Derive the
+  // effective open-state during render instead of clearing it via an effect,
+  // which would trigger a cascading re-render.
+  const settingsActuallyOpen = settingsOpen && viewLayout !== "grid";
 
   const goTo = useCallback(
     (index: number) => {
@@ -161,23 +184,23 @@ export function DocumentViewer({
     return () => window.removeEventListener("keydown", handleKeyNav);
   }, [handleKeyNav]);
 
-  function adjustZoom(delta: number) {
+  const adjustZoom = useCallback((delta: number) => {
     setZoom((current) => clamp(round2(current + delta), ZOOM_MIN, ZOOM_MAX));
-  }
+  }, []);
 
-  function setZoomExact(value: number) {
+  const setZoomExact = useCallback((value: number) => {
     setZoom(clamp(round2(value), ZOOM_MIN, ZOOM_MAX));
-  }
+  }, []);
 
-  function resetView() {
+  const resetView = useCallback(() => {
     setZoom(1);
     setPan({ x: 0, y: 0 });
     setRotation(0);
-  }
+  }, []);
 
-  function rotate90() {
+  const rotate90 = useCallback(() => {
     setRotation((current) => (current + 90) % 360);
-  }
+  }, []);
 
   function handleStagePointerDown(event: ReactPointerEvent<HTMLDivElement>) {
     if (!stageRef.current) return;
@@ -208,11 +231,20 @@ export function DocumentViewer({
     dragRef.current = null;
   }
 
-  function handleStageWheel(event: ReactWheelEvent<HTMLDivElement>) {
-    if (!event.ctrlKey && !event.metaKey) return;
-    event.preventDefault();
-    adjustZoom(event.deltaY < 0 ? ZOOM_STEP : -ZOOM_STEP);
-  }
+  useEffect(() => {
+    const stage = stageRef.current;
+    if (!stage) return;
+
+    function handleWheel(event: WheelEvent) {
+      if (viewLayout === "grid") return;
+      if (!event.ctrlKey && !event.metaKey) return;
+      event.preventDefault();
+      adjustZoom(event.deltaY < 0 ? ZOOM_STEP : -ZOOM_STEP);
+    }
+
+    stage.addEventListener("wheel", handleWheel, { passive: false });
+    return () => stage.removeEventListener("wheel", handleWheel);
+  }, [adjustZoom, viewLayout]);
 
   function handleStageDoubleClick() {
     if (zoom > 1) {
@@ -223,9 +255,7 @@ export function DocumentViewer({
   }
 
   function handleTextareaChange(event: React.ChangeEvent<HTMLTextAreaElement>) {
-    const next = event.target.value;
-    setEditedText(next);
-    onTranscriptionChange?.(next);
+    setEditedText(event.target.value);
   }
 
   const dirty = editedText !== savedText;
@@ -302,14 +332,20 @@ export function DocumentViewer({
     }
   }
 
+  const currentPage = hasPages ? pages[activePage] : undefined;
+  const downloadUrl =
+    currentPage?.originalUrl ?? pages.find((page) => page.originalUrl)?.originalUrl;
+
   function handleDownload() {
-    const sourceName = document.sourceFile.name;
-    toast.info("Source file download", {
-      description: `${sourceName} would be streamed from the archival store.`,
-    });
+    if (!downloadUrl) return;
+    const anchor = window.document.createElement("a");
+    anchor.href = downloadUrl;
+    anchor.download = document.sourceFile.name;
+    anchor.target = "_blank";
+    anchor.rel = "noopener noreferrer";
+    anchor.click();
   }
 
-  const currentPage = hasPages ? pages[activePage] : undefined;
   const adjacentPage =
     viewLayout === "two-page" && hasPages ? pages[activePage + 1] : undefined;
 
@@ -341,9 +377,10 @@ export function DocumentViewer({
         rightOpen={rightOpen}
         onToggleLeft={() => setLeftOpen((value) => !value)}
         onToggleRight={() => setRightOpen((value) => !value)}
-        settingsOpen={settingsOpen}
+        settingsOpen={settingsActuallyOpen}
         onToggleSettings={() => setSettingsOpen((value) => !value)}
         zoom={zoom}
+        zoomDisabled={viewLayout === "grid"}
         onZoomIn={() => adjustZoom(ZOOM_STEP)}
         onZoomOut={() => adjustZoom(-ZOOM_STEP)}
         onRotate={rotate90}
@@ -378,7 +415,7 @@ export function DocumentViewer({
           zoom={zoom}
           pan={pan}
           rotation={rotation}
-          settingsOpen={settingsOpen}
+          settingsOpen={settingsActuallyOpen}
           onCloseSettings={() => setSettingsOpen(false)}
           onZoomSlider={setZoomExact}
           onRotate={rotate90}
@@ -387,7 +424,6 @@ export function DocumentViewer({
           onPointerMove={handleStagePointerMove}
           onPointerUp={handleStagePointerUp}
           onPointerCancel={handleStagePointerUp}
-          onWheel={handleStageWheel}
           onDoubleClick={handleStageDoubleClick}
         />
 
@@ -410,6 +446,7 @@ export function DocumentViewer({
 
       <BottomBar
         onDownload={handleDownload}
+        downloadDisabled={!downloadUrl}
         onShare={handleShare}
         onFullscreen={handleFullscreen}
         leftOpen={leftOpen}
@@ -455,6 +492,7 @@ interface ToolbarProps {
   settingsOpen: boolean;
   onToggleSettings: () => void;
   zoom: number;
+  zoomDisabled?: boolean;
   onZoomIn: () => void;
   onZoomOut: () => void;
   onRotate: () => void;
@@ -481,6 +519,7 @@ function Toolbar({
   settingsOpen,
   onToggleSettings,
   zoom,
+  zoomDisabled = false,
   onZoomIn,
   onZoomOut,
   onRotate,
@@ -599,27 +638,49 @@ function Toolbar({
           </LayoutToggle>
         </div>
 
-        <ToolbarIconButton ariaLabel="Zoom out" onClick={onZoomOut}>
+        <ToolbarIconButton
+          ariaLabel="Zoom out"
+          title={zoomDisabled ? "Switch to single-page view to zoom" : undefined}
+          onClick={onZoomOut}
+          disabled={zoomDisabled || zoom <= ZOOM_MIN}
+        >
           <Minus className="h-3.5 w-3.5" strokeWidth={2} />
         </ToolbarIconButton>
         <span className="font-mono text-[11px] tabular-nums text-white/70">
           {Math.round(zoom * 100)}%
         </span>
-        <ToolbarIconButton ariaLabel="Zoom in" onClick={onZoomIn}>
+        <ToolbarIconButton
+          ariaLabel="Zoom in"
+          title={zoomDisabled ? "Switch to single-page view to zoom" : undefined}
+          onClick={onZoomIn}
+          disabled={zoomDisabled || zoom >= ZOOM_MAX}
+        >
           <Plus className="h-3.5 w-3.5" strokeWidth={2} />
         </ToolbarIconButton>
-        <ToolbarIconButton ariaLabel="Rotate 90 degrees" onClick={onRotate}>
+        <ToolbarIconButton
+          ariaLabel="Rotate 90 degrees"
+          title={zoomDisabled ? "Switch to single-page view to zoom" : undefined}
+          onClick={onRotate}
+          disabled={zoomDisabled}
+        >
           <RotateCw className="h-3.5 w-3.5" strokeWidth={2} />
         </ToolbarIconButton>
-        <ToolbarIconButton ariaLabel="Reset view" onClick={onReset}>
+        <ToolbarIconButton
+          ariaLabel="Reset view"
+          title={zoomDisabled ? "Switch to single-page view to zoom" : undefined}
+          onClick={onReset}
+          disabled={zoomDisabled}
+        >
           <span className="font-mono text-[10px] font-semibold uppercase tracking-wide">
             1:1
           </span>
         </ToolbarIconButton>
         <ToolbarIconButton
           ariaLabel="Viewer settings"
+          title={zoomDisabled ? "Switch to single-page view to zoom" : undefined}
           onClick={onToggleSettings}
           active={settingsOpen}
+          disabled={zoomDisabled}
         >
           <Settings className="h-3.5 w-3.5" strokeWidth={1.8} />
         </ToolbarIconButton>
@@ -641,12 +702,14 @@ function ToolbarIconButton({
   disabled,
   ariaLabel,
   active,
+  title,
 }: {
   children: React.ReactNode;
   onClick: () => void;
   disabled?: boolean;
   ariaLabel: string;
   active?: boolean;
+  title?: string;
 }) {
   return (
     <button
@@ -655,6 +718,7 @@ function ToolbarIconButton({
       disabled={disabled}
       aria-label={ariaLabel}
       aria-pressed={active}
+      title={title}
       className={cn(
         "inline-flex h-7 w-7 items-center justify-center rounded-md text-white/85 transition-colors",
         "hover:bg-white/15 hover:text-white",
@@ -884,7 +948,6 @@ interface SourceStageProps {
   onPointerMove: (event: ReactPointerEvent<HTMLDivElement>) => void;
   onPointerUp: (event: ReactPointerEvent<HTMLDivElement>) => void;
   onPointerCancel: (event: ReactPointerEvent<HTMLDivElement>) => void;
-  onWheel: (event: ReactWheelEvent<HTMLDivElement>) => void;
   onDoubleClick: () => void;
 }
 
@@ -908,7 +971,6 @@ function SourceStage({
   onPointerMove,
   onPointerUp,
   onPointerCancel,
-  onWheel,
   onDoubleClick,
 }: SourceStageProps) {
   const stageStyle: CSSProperties = {
@@ -927,7 +989,6 @@ function SourceStage({
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
       onPointerCancel={onPointerCancel}
-      onWheel={onWheel}
       onDoubleClick={onDoubleClick}
       style={stageStyle}
       className={cn(
@@ -944,20 +1005,25 @@ function SourceStage({
       ) : currentPage ? (
         <motion.div
           key={`${currentPage.id}-${viewLayout}`}
-          initial={{ opacity: 0, y: 6 }}
-          animate={{ opacity: 1, y: 0 }}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
           transition={motionSpring}
-          className="flex h-full max-h-full w-full items-center justify-center gap-6"
-          style={{ transform, transformOrigin: "center center" }}
+          className="flex h-full max-h-full w-full items-center justify-center"
         >
-          <div className="flex h-full min-w-0 flex-1 items-center justify-center">
-            <PageRender page={currentPage} />
-          </div>
-          {viewLayout === "two-page" && adjacentPage ? (
+          <div
+            data-testid="viewer-transform-layer"
+            className="flex h-full max-h-full w-full items-center justify-center gap-6"
+            style={{ transform, transformOrigin: "center center" }}
+          >
             <div className="flex h-full min-w-0 flex-1 items-center justify-center">
-              <PageRender page={adjacentPage} />
+              <PageRender page={currentPage} />
             </div>
-          ) : null}
+            {viewLayout === "two-page" && adjacentPage ? (
+              <div className="flex h-full min-w-0 flex-1 items-center justify-center">
+                <PageRender page={adjacentPage} />
+              </div>
+            ) : null}
+          </div>
         </motion.div>
       ) : (
         <EmptyStage />
@@ -1308,6 +1374,7 @@ function TranscriptionPane({
 
 interface BottomBarProps {
   onDownload: () => void;
+  downloadDisabled?: boolean;
   onShare: () => void;
   onFullscreen: () => void;
   leftOpen: boolean;
@@ -1320,6 +1387,7 @@ interface BottomBarProps {
 
 function BottomBar({
   onDownload,
+  downloadDisabled = false,
   onShare,
   onFullscreen,
   leftOpen,
@@ -1332,7 +1400,20 @@ function BottomBar({
   return (
     <div className="flex shrink-0 items-center justify-between gap-3 border-t border-slate-800 bg-slate-900 px-3 py-2 text-[12px] text-white/80">
       <div className="flex items-center gap-1.5">
-        <BottomIconButton ariaLabel="Download source" onClick={onDownload}>
+        <BottomIconButton
+          ariaLabel={
+            downloadDisabled
+              ? "Download unavailable — source image not yet attached"
+              : "Download source"
+          }
+          title={
+            downloadDisabled
+              ? "Source file is not yet attached for download"
+              : undefined
+          }
+          onClick={onDownload}
+          disabled={downloadDisabled}
+        >
           <Download className="h-3.5 w-3.5" strokeWidth={1.8} />
         </BottomIconButton>
         <BottomIconButton ariaLabel="Share or embed link" onClick={onShare}>
@@ -1376,22 +1457,29 @@ function BottomIconButton({
   onClick,
   ariaLabel,
   active,
+  disabled,
+  title,
 }: {
   children: React.ReactNode;
   onClick: () => void;
   ariaLabel: string;
   active?: boolean;
+  disabled?: boolean;
+  title?: string;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
+      disabled={disabled}
       aria-label={ariaLabel}
       aria-pressed={active}
+      title={title}
       className={cn(
         "inline-flex h-7 w-7 items-center justify-center rounded-md text-white/80 transition-colors",
         "hover:bg-white/15 hover:text-white",
         active ? "bg-white/20 text-white" : "",
+        "disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent",
       )}
     >
       {children}

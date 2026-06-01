@@ -1,5 +1,6 @@
 import { sampleDocuments, sampleMetadata, sampleTranscription } from "./sample-data";
 import type {
+  DocumentRecord,
   DocumentRecords,
   EdisonRepository,
   ReviewCase,
@@ -29,6 +30,21 @@ export class InMemoryEdisonRepository implements EdisonRepository {
     return [...this.documents.values()].sort((a, b) =>
       a.updatedAt < b.updatedAt ? 1 : -1,
     );
+  }
+
+  async listDocumentIds(): Promise<string[]> {
+    return [...this.documents.keys()];
+  }
+
+  async getDocumentRecord(documentId: string): Promise<DocumentRecord | null> {
+    const document = this.documents.get(documentId);
+    if (!document) return null;
+    return {
+      document,
+      transcription:
+        this.transcriptions.get(documentId) ?? emptyTranscription(documentId),
+      metadata: this.metadata.get(documentId) ?? emptyMetadata(document),
+    };
   }
 
   async listDocumentRecords(): Promise<DocumentRecords> {

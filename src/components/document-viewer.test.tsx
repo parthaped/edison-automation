@@ -47,20 +47,6 @@ describe("DocumentViewer", () => {
     ).toBeInTheDocument();
   });
 
-  it("notifies the parent when the transcription is edited", async () => {
-    const user = userEvent.setup();
-    const onTranscriptionChange = vi.fn();
-    renderViewer({ onTranscriptionChange });
-
-    const textarea = screen.getByLabelText("Diplomatic transcription");
-    await user.type(textarea, " extra");
-
-    expect(onTranscriptionChange).toHaveBeenCalled();
-    const lastCallArg = onTranscriptionChange.mock.calls.at(-1)?.[0];
-    expect(typeof lastCallArg).toBe("string");
-    expect(lastCallArg).toContain("extra");
-  });
-
   it("selects an uncertain reading in the textarea when its chip is clicked", async () => {
     const user = userEvent.setup();
     renderViewer();
@@ -84,5 +70,65 @@ describe("DocumentViewer", () => {
     expect(
       screen.getByText("No extracted pages available."),
     ).toBeInTheDocument();
+  });
+
+  it("applies zoom transform when zoom in is clicked", async () => {
+    const user = userEvent.setup();
+    renderViewer();
+
+    await user.click(screen.getByLabelText("Zoom in"));
+
+    const transformLayer = screen.getByTestId("viewer-transform-layer");
+    expect(transformLayer.style.transform).toContain("scale(1.25)");
+  });
+
+  it("disables zoom controls in grid layout", async () => {
+    const user = userEvent.setup();
+    renderViewer();
+
+    await user.click(screen.getByLabelText("Grid"));
+
+    expect(screen.getByLabelText("Zoom in")).toBeDisabled();
+    expect(screen.getByLabelText("Zoom out")).toBeDisabled();
+    expect(screen.getByLabelText("Rotate 90 degrees")).toBeDisabled();
+    expect(screen.getByLabelText("Reset view")).toBeDisabled();
+    expect(screen.getByLabelText("Viewer settings")).toBeDisabled();
+  });
+
+  it("disables download when no source URL is available", () => {
+    renderViewer();
+    expect(
+      screen.getByLabelText("Download unavailable — source image not yet attached"),
+    ).toBeDisabled();
+  });
+
+  it("downloads source when originalUrl is present", async () => {
+    const user = userEvent.setup();
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click");
+    const documentWithUrl = {
+      ...multiPageDocument,
+      pages: multiPageDocument.pages.map((page, index) =>
+        index === 0
+          ? { ...page, originalUrl: "https://blob.example/page-1.jpg" }
+          : page,
+      ),
+    } as DocumentPackage;
+
+    renderViewer({ document: documentWithUrl });
+
+    const downloadButton = screen.getByLabelText("Download source");
+    expect(downloadButton).not.toBeDisabled();
+
+    await user.click(downloadButton);
+
+    expect(clickSpy).toHaveBeenCalled();
+    clickSpy.mockRestore();
+  });
+
+  it("opens on the requested initial page", () => {
+    renderViewer({ initialPage: 1 });
+
+    const pageInput = screen.getByLabelText("Go to page") as HTMLInputElement;
+    expect(pageInput.value).toBe("2");
   });
 });

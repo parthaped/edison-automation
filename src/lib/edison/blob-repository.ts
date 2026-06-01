@@ -1,5 +1,6 @@
 import { list, put } from "@vercel/blob";
 import type {
+  DocumentRecord,
   DocumentRecords,
   EdisonRepository,
   ReviewCase,
@@ -18,14 +19,20 @@ import type {
 
 const RECORD_PREFIX = "records/";
 
-interface DocumentRecord {
-  document: DocumentPackage;
-  transcription: TranscriptionRun;
-  metadata: MetadataExtraction;
-}
-
 function recordPath(documentId: string): string {
   return `${RECORD_PREFIX}${encodeURIComponent(documentId)}.json`;
+}
+
+function documentIdFromPathname(pathname: string): string | null {
+  if (!pathname.startsWith(RECORD_PREFIX) || !pathname.endsWith(".json")) {
+    return null;
+  }
+  const encoded = pathname.slice(RECORD_PREFIX.length, -".json".length);
+  try {
+    return decodeURIComponent(encoded);
+  } catch {
+    return null;
+  }
 }
 
 export class BlobEdisonRepository implements EdisonRepository {
@@ -80,6 +87,19 @@ export class BlobEdisonRepository implements EdisonRepository {
     return records
       .map((record) => record.document)
       .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
+  }
+
+  async listDocumentIds(): Promise<string[]> {
+    // Only the blob index is needed; record bodies are never fetched. The
+    // document ID is encoded in the pathname (records/<id>.json).
+    const { blobs } = await list({ prefix: RECORD_PREFIX, limit: 1000 });
+    return blobs
+      .map((blob) => documentIdFromPathname(blob.pathname))
+      .filter((id): id is string => id !== null);
+  }
+
+  async getDocumentRecord(documentId: string): Promise<DocumentRecord | null> {
+    return this.readRecord(documentId);
   }
 
   async listDocumentRecords(): Promise<DocumentRecords> {

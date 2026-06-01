@@ -1,12 +1,16 @@
+import { put } from "@vercel/blob";
 import {
   FatalError,
   RetryableError,
   getWritable,
 } from "workflow";
+import { assignDocumentId, normalizeFolderId } from "../id-policy";
 import type { BatchEvent } from "../ingest-job-store";
+import { rasterizePdfPages } from "../rasterize-pdf";
 import { processSourceFile } from "../service";
 import type {
   ManualIngestResult,
+  PageImageUrl,
   TranscriptionError,
 } from "../service";
 import { getEdisonService } from "../service-factory";
@@ -65,6 +69,16 @@ export async function batchIngestWorkflow(
     files: input.blobs.map((blob) => ({ name: blob.name, size: blob.size })),
   });
 
+  // Assign every document ID up front in a single durable step. Doing this
+  // before the concurrent chunks run guarantees collision-free identifiers even
+  // when two files in the same chunk resolve to the same embedded ID (the
+  // per-file persist steps run concurrently and would otherwise each read the
+  // store before any of them has written).
+  const documentIds = await assignIdsStep({
+    folderId: input.folderId,
+    fileNames: input.blobs.map((blob) => blob.name),
+  });
+
   const results: FileResult[] = [];
   const failures: FileFailure[] = [];
 
@@ -81,6 +95,7 @@ export async function batchIngestWorkflow(
           blob,
           promptTask: input.promptTask ?? "diplomatic-transcription",
           batchIndex: chunkStart + offset + 1,
+          documentId: documentIds[chunkStart + offset],
           aiEnabled,
         }),
       ),
@@ -127,23 +142,31 @@ interface ProcessOneFileInput {
   blob: BlobRef;
   promptTask: "diplomatic-transcription" | "project-notebook";
   batchIndex: number;
+  documentId: string;
   aiEnabled: boolean;
 }
 
 async function processOneFile(input: ProcessOneFileInput): Promise<FileResult> {
-  const { folderId, blob, promptTask, batchIndex, aiEnabled } = input;
+  const { folderId, blob, promptTask, batchIndex, documentId, aiEnabled } =
+    input;
 
   const transcribed = await transcribeFileStep({ blob, promptTask, aiEnabled });
+
+  // Rasterize in its own step so it gets its own 60s budget separate from the
+  // OCR call. PDFs become per-page JPGs in Blob; image uploads pass through.
+  const pageImageUrls = await rasterizeFileStep({ blob, documentId });
 
   const persisted = await persistFileStep({
     folderId,
     blob,
     batchIndex,
+    documentId,
     ocrText: transcribed.ocrText,
     model: transcribed.model,
     inputTokens: transcribed.inputTokens,
     outputTokens: transcribed.outputTokens,
     metadata: transcribed.metadata,
+    pageImageUrls,
   });
 
   return {
@@ -172,6 +195,35 @@ async function emitBatchStartedStep(input: {
     folderId: input.folderId,
     files: input.files,
     startedAt: new Date().toISOString(),
+  });
+}
+
+// Reads the existing document IDs once and assigns a collision-free identifier
+// to every incoming file, accumulating assignments so two files in the same
+// batch that embed the same ID get distinct identifiers. Runs as a single
+// durable step before any concurrent processing.
+async function assignIdsStep(input: {
+  folderId?: string;
+  fileNames: string[];
+}): Promise<string[]> {
+  "use step";
+
+  const existingIds = new Set(
+    await getEdisonService().getRepository().listDocumentIds(),
+  );
+  const folderId = input.folderId
+    ? normalizeFolderId(input.folderId)
+    : "UNASSIGNED-F";
+
+  return input.fileNames.map((fileName, index) => {
+    const assigned = assignDocumentId({
+      folderId,
+      sourceName: fileName,
+      batchIndex: index + 1,
+      existingIds,
+    });
+    existingIds.add(assigned.documentId);
+    return assigned.documentId;
   });
 }
 
@@ -246,15 +298,90 @@ async function transcribeFileStep(
   return { errors };
 }
 
+interface RasterizeFileStepInput {
+  blob: BlobRef;
+  documentId: string;
+}
+
+// Step 1.5: render each PDF page to a JPG and upload it to Blob, returning a
+// per-page URL list the persist step then attaches to the document. Image
+// uploads short-circuit to a single entry pointing at the original blob URL,
+// so the viewer renders them through the same `<img>` path as PDF pages.
+//
+// Failures are intentionally non-fatal: we emit a stage event and return an
+// empty list. The document still persists, just with the FacsimileSheet
+// placeholder in the viewer (matching the pre-rasterizer behavior). This keeps
+// a single bad PDF from poisoning a whole batch.
+async function rasterizeFileStep(
+  input: RasterizeFileStepInput,
+): Promise<PageImageUrl[]> {
+  "use step";
+
+  const { blob, documentId } = input;
+  const contentType = blob.contentType.toLowerCase();
+
+  if (contentType !== "application/pdf") {
+    if (contentType.startsWith("image/")) {
+      return [{ pageIndex: 0, url: blob.url }];
+    }
+    return [];
+  }
+
+  await emitEvent({
+    type: "file-stage",
+    fileName: blob.name,
+    stage: "rasterizing",
+    at: new Date().toISOString(),
+  });
+
+  try {
+    const bytes = await fetchBlobBytes(blob);
+    const pages = await rasterizePdfPages(bytes);
+    const uploaded: PageImageUrl[] = [];
+    for (const page of pages) {
+      const pageNumber = page.pageIndex + 1;
+      const padded = String(pageNumber).padStart(4, "0");
+      // Vercel Blob's PutBody type rejects raw Uint8Array but accepts Buffer.
+      // Wrapping the rasterized JPG in Buffer.from is a no-copy adapter on
+      // Node runtimes.
+      const result = await put(
+        `page-images/${encodeURIComponent(documentId)}/${padded}.jpg`,
+        Buffer.from(page.jpg.buffer, page.jpg.byteOffset, page.jpg.byteLength),
+        {
+          access: "public",
+          contentType: "image/jpeg",
+          addRandomSuffix: true,
+        },
+      );
+      uploaded.push({
+        pageIndex: page.pageIndex,
+        url: result.url,
+        width: page.width,
+        height: page.height,
+      });
+    }
+    return uploaded;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn("[batch-ingest] rasterize:failed", {
+      fileName: blob.name,
+      message,
+    });
+    return [];
+  }
+}
+
 interface PersistFileStepInput {
   folderId?: string;
   blob: BlobRef;
   batchIndex: number;
+  documentId: string;
   ocrText?: string;
   model?: string;
   inputTokens?: number;
   outputTokens?: number;
   metadata?: TranscribedMetadata;
+  pageImageUrls: PageImageUrl[];
 }
 
 interface PersistFileStepResult {
@@ -264,14 +391,14 @@ interface PersistFileStepResult {
 }
 
 // Step 2: extract pages, merge the folded metadata, and persist the document
-// (no AI call). Source image URLs from the retained blob are attached so the
-// viewer can render the original alongside the transcription.
+// (no AI call). Per-page image URLs from the rasterize step are attached so
+// the viewer can render the original alongside the transcription.
 async function persistFileStep(
   input: PersistFileStepInput,
 ): Promise<PersistFileStepResult> {
   "use step";
 
-  const { folderId, blob, batchIndex, ocrText, model } = input;
+  const { folderId, blob, batchIndex, documentId, ocrText, model } = input;
 
   await emitEvent({
     type: "file-stage",
@@ -288,20 +415,18 @@ async function persistFileStep(
     mimeType: blob.contentType,
   };
 
-  const repository = getEdisonService().getRepository();
-  const existingIds = new Set(
-    (await repository.listDocuments()).map((document) => document.documentId),
-  );
-
+  // The document ID was already assigned collision-free in assignIdsStep, so we
+  // preserve it as-is and pass an empty existing-ID set (no per-file store scan).
   const processed = await processSourceFile({
     sourceFile,
     bytes,
     folderId,
     batchIndex,
-    existingIds,
+    existingIds: new Set(),
+    providedDocumentId: documentId,
     rawOcrText: ocrText,
     model,
-    sourceUrl: blob.url,
+    pageImageUrls: input.pageImageUrls,
   });
 
   const transcription: TranscriptionRun = {
@@ -327,7 +452,9 @@ async function persistFileStep(
       }
     : processed.metadata;
 
-  await repository.saveProcessedDocument(documentPackage, transcription, metadata);
+  await getEdisonService()
+    .getRepository()
+    .saveProcessedDocument(documentPackage, transcription, metadata);
 
   await emitEvent({
     type: "file-completed",

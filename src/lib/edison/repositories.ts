@@ -25,9 +25,19 @@ export interface ReviewCase {
   metadata: Record<string, MetadataExtraction>;
 }
 
+export interface DocumentRecord {
+  document: DocumentPackage;
+  transcription: TranscriptionRun;
+  metadata: MetadataExtraction;
+}
+
 export interface EdisonRepository {
   listDocuments(): Promise<DocumentPackage[]>;
+  // Lightweight listing of just the document identifiers. Used by the ingest
+  // workflow to assign collision-free IDs without fetching every record body.
+  listDocumentIds(): Promise<string[]>;
   listDocumentRecords(): Promise<DocumentRecords>;
+  getDocumentRecord(documentId: string): Promise<DocumentRecord | null>;
   saveDocuments(documents: DocumentPackage[]): Promise<void>;
   saveProcessedDocuments(
     documents: DocumentPackage[],

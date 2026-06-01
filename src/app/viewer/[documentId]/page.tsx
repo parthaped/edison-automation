@@ -12,32 +12,28 @@ export const metadata: Metadata = {
 
 interface ViewerPageProps {
   params: Promise<{ documentId: string }>;
+  searchParams: Promise<{ page?: string }>;
 }
 
-export default async function ViewerPage({ params }: ViewerPageProps) {
+export default async function ViewerPage({ params, searchParams }: ViewerPageProps) {
   const { documentId } = await params;
+  const { page: pageParam } = await searchParams;
+  const parsedPage = Number.parseInt(pageParam ?? "", 10);
+  const initialPage =
+    Number.isFinite(parsedPage) && parsedPage > 0 ? parsedPage - 1 : 0;
 
-  const reviewCase = await getEdisonService().getReviewCase(documentId);
+  const record = await getEdisonService().getDocumentRecord(documentId);
 
-  if (!reviewCase) {
+  if (!record) {
     notFound();
   }
-
-  const document = reviewCase.documents.find(
-    (item) => item.documentId === documentId,
-  );
-
-  if (!document) {
-    notFound();
-  }
-
-  const transcription = reviewCase.transcriptions[document.documentId];
 
   return (
     <main className="flex h-[100svh] flex-col overflow-hidden bg-background p-3 sm:p-6">
       <DocumentViewer
-        document={document}
-        transcription={transcription}
+        document={record.document}
+        transcription={record.transcription}
+        initialPage={initialPage}
         className="min-h-0 flex-1"
       />
     </main>

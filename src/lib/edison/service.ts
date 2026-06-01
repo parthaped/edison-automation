@@ -3,13 +3,13 @@ import { buildAuditTrail, type AuditEvent } from "./audit";
 import { createDocumentPackage } from "./extraction";
 import { buildOmekaCsv, buildOmekaCsvRow } from "./omeka-export";
 import { getActivePrompt } from "./prompts";
-import type { EdisonRepository } from "./repositories";
+import type {
+  DashboardSummary,
+  DocumentRecords,
+  EdisonRepository,
+  ReviewCase,
+} from "./repositories";
 import { summarizeDocuments } from "./repositories";
-import {
-  isTranscribableMediaType,
-  transcribeDocument,
-  type TranscribedMetadata,
-} from "./transcribe";
 import type {
   ConfidenceBucket,
   DocumentPackage,
@@ -17,19 +17,6 @@ import type {
   SourceFile,
   TranscriptionRun,
 } from "./types";
-
-export interface UploadFileLike {
-  name: string;
-  size: number;
-  type: string;
-  arrayBuffer(): Promise<ArrayBuffer>;
-}
-
-export interface ManualIngestInput {
-  files: UploadFileLike[];
-  folderId?: string;
-  onProgress?: (progress: ManualIngestProgress) => void;
-}
 
 export interface TranscriptionError {
   fileName: string;
@@ -42,13 +29,6 @@ export interface ManualIngestResult {
   transcriptions: TranscriptionRun[];
   metadata: MetadataExtraction[];
   transcriptionErrors: TranscriptionError[];
-}
-
-export interface ManualIngestProgress {
-  fileName: string;
-  stage: "transcribing" | "extracting" | "metadata" | "saving";
-  processedFiles: number;
-  totalFiles: number;
 }
 
 export interface BatchExportRow {
@@ -69,11 +49,25 @@ export interface ProcessSourceFileInput {
   folderId?: string;
   batchIndex: number;
   existingIds: Set<string>;
+  // Pre-assigned, collision-free document identifier. When supplied (e.g. by the
+  // ingest workflow's assignment pre-pass), it is preserved as-is instead of
+  // re-deriving an ID from the filename, which avoids races between concurrent
+  // files that resolve to the same embedded identifier.
+  providedDocumentId?: string;
   rawOcrText?: string;
   model?: string;
-  // Durable URL of the retained source file. Attached to image pages so the
-  // viewer can render the original alongside the transcription.
-  sourceUrl?: string;
+  // Per-page durable URLs to render in the viewer. Single-image uploads supply
+  // exactly one entry for `pageIndex: 0`; multi-page PDFs are rasterized to
+  // JPGs upstream and supply one entry per page. Pages without an entry fall
+  // back to the FacsimileSheet placeholder.
+  pageImageUrls?: PageImageUrl[];
+}
+
+export interface PageImageUrl {
+  pageIndex: number;
+  url: string;
+  width?: number;
+  height?: number;
 }
 
 export interface ProcessSourceFileResult {
@@ -147,6 +141,40 @@ function extractUncertainReadings(text: string): string[] {
   return text.match(/\[[^\]]+\?\]/g) ?? [];
 }
 
+// Derives the review case from an already-loaded records snapshot. Mirrors the
+// repository-level getReviewCase logic but avoids an extra store read when the
+// caller has the records in hand.
+function buildReviewCaseFromRecords(
+  records: DocumentRecords,
+  documentId?: string,
+): ReviewCase | null {
+  const allDocuments = records.documents;
+  if (allDocuments.length === 0) return null;
+
+  const reviewable = allDocuments.filter((document) =>
+    ["needs_review", "blocked"].includes(document.status),
+  );
+  const documents = reviewable.length > 0 ? reviewable : allDocuments;
+  const selected =
+    documents.find((document) => document.documentId === documentId) ??
+    documents[0];
+
+  const transcriptions: Record<string, TranscriptionRun> = {};
+  const metadata: Record<string, MetadataExtraction> = {};
+  for (const document of documents) {
+    transcriptions[document.documentId] =
+      records.transcriptions[document.documentId];
+    metadata[document.documentId] = records.metadata[document.documentId];
+  }
+
+  return {
+    documents,
+    selectedDocumentId: selected.documentId,
+    transcriptions,
+    metadata,
+  };
+}
+
 export async function processSourceFile(
   input: ProcessSourceFileInput,
 ): Promise<ProcessSourceFileResult> {
@@ -154,23 +182,33 @@ export async function processSourceFile(
     sourceFile: input.sourceFile,
     bytes: input.bytes,
     folderId: input.folderId,
+    providedDocumentId: input.providedDocumentId,
     batchIndex: input.batchIndex,
     existingIds: input.existingIds,
   });
 
-  // Attach the retained source URL to image pages so the viewer renders the
-  // original. Single-image uploads have exactly one page; multi-page PDFs are
-  // not rasterized per page, so they keep the facsimile placeholder.
-  const isImageSource = input.sourceFile.mimeType.toLowerCase().startsWith("image/");
+  // Attach the per-page rendered image URLs supplied by the rasterize step.
+  // PDFs come back with one URL per page; image uploads come back with a
+  // single entry for page 0. Pages without a URL keep the FacsimileSheet
+  // placeholder and a disabled download button in the viewer.
+  const urlByPageIndex = new Map<number, PageImageUrl>();
+  for (const entry of input.pageImageUrls ?? []) {
+    urlByPageIndex.set(entry.pageIndex, entry);
+  }
   const documentPackage: DocumentPackage =
-    input.sourceUrl && isImageSource
+    urlByPageIndex.size > 0 && built.pages.length > 0
       ? {
           ...built,
-          pages: built.pages.map((page) =>
-            page.pageIndex === 0
-              ? { ...page, originalUrl: input.sourceUrl }
-              : page,
-          ),
+          pages: built.pages.map((page) => {
+            const match = urlByPageIndex.get(page.pageIndex);
+            if (!match) return page;
+            return {
+              ...page,
+              originalUrl: match.url,
+              ...(match.width !== undefined ? { width: match.width } : {}),
+              ...(match.height !== undefined ? { height: match.height } : {}),
+            };
+          }),
         }
       : built;
 
@@ -226,19 +264,31 @@ export class EdisonAutomationService {
     return this.repository;
   }
 
-  async getDashboard() {
+  async getDashboard(): Promise<{ summary: DashboardSummary }> {
     const documents = await this.repository.listDocuments();
-    const reviewCase = await this.repository.getReviewCase();
+    return { summary: summarizeDocuments(documents) };
+  }
 
+  // Loads everything the review page needs in a single store read: the summary
+  // counts and the review case are both derived from one records snapshot
+  // instead of issuing three separate full-store scans.
+  async getReviewWorkbench(documentId?: string): Promise<{
+    summary: DashboardSummary;
+    reviewCase: ReviewCase | null;
+  }> {
+    const records = await this.repository.listDocumentRecords();
     return {
-      summary: summarizeDocuments(documents),
-      documents,
-      reviewCase,
+      summary: summarizeDocuments(records.documents),
+      reviewCase: buildReviewCaseFromRecords(records, documentId),
     };
   }
 
   async getReviewCase(documentId?: string) {
     return this.repository.getReviewCase(documentId);
+  }
+
+  async getDocumentRecord(documentId: string) {
+    return this.repository.getDocumentRecord(documentId);
   }
 
   async getAuditTrail(): Promise<AuditEvent[]> {
@@ -255,127 +305,6 @@ export class EdisonAutomationService {
       throw new AppError("NOT_FOUND", "Document was not found.", 404);
     }
     return updated;
-  }
-
-  async ingestManualFiles(
-    input: ManualIngestInput,
-  ): Promise<ManualIngestResult> {
-    if (input.files.length === 0) {
-      throw new AppError(
-        "BAD_REQUEST",
-        "Upload at least one file using the files field.",
-        400,
-      );
-    }
-
-    const existingIds = new Set(
-      (await this.repository.listDocuments()).map((document) => document.documentId),
-    );
-    const packages: DocumentPackage[] = [];
-    const transcriptions: TranscriptionRun[] = [];
-    const metadata: MetadataExtraction[] = [];
-    const transcriptionErrors: TranscriptionError[] = [];
-    const aiGatewayConfigured = Boolean(process.env.AI_GATEWAY_API_KEY);
-
-    const totalFiles = input.files.length;
-    for (const [index, file] of input.files.entries()) {
-      const bytes = new Uint8Array(await file.arrayBuffer());
-      const sourceFile: SourceFile = {
-        id: crypto.randomUUID(),
-        name: file.name,
-        size: file.size,
-        mimeType: file.type || "application/octet-stream",
-      };
-
-      let rawOcrText: string | undefined;
-      let transcribeModel: string | undefined;
-      let transcribeInputTokens: number | undefined;
-      let transcribeOutputTokens: number | undefined;
-      let foldedMetadata: TranscribedMetadata | undefined;
-
-      if (aiGatewayConfigured && isTranscribableMediaType(sourceFile.mimeType)) {
-        try {
-          input.onProgress?.({
-            fileName: sourceFile.name,
-            stage: "transcribing",
-            processedFiles: index,
-            totalFiles,
-          });
-          const transcribed = await transcribeDocument({
-            bytes,
-            mediaType: sourceFile.mimeType,
-          });
-          rawOcrText = transcribed.ocrText;
-          transcribeModel = transcribed.model;
-          transcribeInputTokens = transcribed.inputTokens;
-          transcribeOutputTokens = transcribed.outputTokens;
-          foldedMetadata = transcribed.metadata;
-        } catch (error) {
-          transcriptionErrors.push({
-            fileName: sourceFile.name,
-            stage: "transcription",
-            message: error instanceof Error ? error.message : String(error),
-          });
-        }
-      }
-
-      input.onProgress?.({
-        fileName: sourceFile.name,
-        stage: "extracting",
-        processedFiles: index,
-        totalFiles,
-      });
-      const processed = await processSourceFile({
-        sourceFile,
-        bytes,
-        folderId: input.folderId,
-        batchIndex: index + 1,
-        existingIds,
-        rawOcrText,
-        model: transcribeModel,
-      });
-      existingIds.add(processed.documentPackage.documentId);
-
-      // Metadata is produced in the same call as the transcription, so it
-      // never fails the file on its own. Fall back to base metadata otherwise.
-      const documentMetadata: MetadataExtraction = foldedMetadata
-        ? {
-            ...processed.metadata,
-            documentType: foldedMetadata.documentType || "Unknown",
-            date: foldedMetadata.date || "Unknown",
-            authors: foldedMetadata.authors,
-            recipients: foldedMetadata.recipients,
-            mentionedNames: foldedMetadata.mentionedNames,
-            subjects: foldedMetadata.subjects,
-          }
-        : processed.metadata;
-
-      const transcription: TranscriptionRun = {
-        ...processed.transcription,
-        inputTokens: transcribeInputTokens ?? processed.transcription.inputTokens,
-        outputTokens: transcribeOutputTokens ?? processed.transcription.outputTokens,
-      };
-
-      // Real transcription was produced: move out of "queued" so the document
-      // surfaces in the reviewer workbench.
-      const documentPackage: DocumentPackage =
-        rawOcrText !== undefined && processed.documentPackage.status === "queued"
-          ? { ...processed.documentPackage, status: "needs_review" }
-          : processed.documentPackage;
-
-      packages.push(documentPackage);
-      transcriptions.push(transcription);
-      metadata.push(documentMetadata);
-      input.onProgress?.({
-        fileName: sourceFile.name,
-        stage: "saving",
-        processedFiles: index + 1,
-        totalFiles,
-      });
-    }
-
-    await this.repository.saveProcessedDocuments(packages, transcriptions, metadata);
-    return { packages, transcriptions, metadata, transcriptionErrors };
   }
 
   async buildBatchExportFromPayload(
