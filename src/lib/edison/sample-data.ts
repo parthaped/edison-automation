@@ -111,6 +111,7 @@ export const sampleTranscription: TranscriptionRun = {
 export const sampleMetadata: MetadataExtraction = {
   folderId: "D9032-F",
   documentId: "D9032-00001",
+  title: "Marks, William D. to Edison Electric Light Co. of Philadelphia",
   documentType: "correspondence",
   date: "1890-01-12",
   authors: ["Marks, William D."],

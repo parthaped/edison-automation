@@ -40,4 +40,14 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
+# local OCR/HTR datasets and model artifacts
+/ml/data/cache/
+/ml/data/raw/
+/ml/data/manifests/*.csv
+/ml/data/manifests/*.jsonl
+/ml/models/
+/ml/reports/*.jsonl
+/ml/reports/*.csv
+/ml/reports/*.html
+
 .vercel

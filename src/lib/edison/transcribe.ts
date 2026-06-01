@@ -1,5 +1,6 @@
 import { generateText, Output } from "ai";
 import { z } from "zod";
+import { transcribeWithLocalOcr } from "./local-ocr";
 import { getActivePrompt, type TranscriptionPromptTask } from "./prompts";
 
 // Multimodal OCR / HTR and metadata extraction via the Vercel AI Gateway.
@@ -44,6 +45,10 @@ export function getDefaultOcrModel(env: NodeJS.ProcessEnv = process.env): string
   return env.EDISON_OCR_MODEL ?? DEFAULT_OCR_MODEL;
 }
 
+function getLocalOcrUrl(env: NodeJS.ProcessEnv = process.env): string | undefined {
+  return env.EDISON_LOCAL_OCR_URL?.trim() || undefined;
+}
+
 function getRequestTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
   const raw = Number(env.EDISON_AI_TIMEOUT_MS);
   return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_TIMEOUT_MS;
@@ -84,6 +89,7 @@ export interface TranscribeDocumentInput {
 // model call. The caller assembles these into a full MetadataExtraction by
 // adding folderId / documentId / imageNames / confidence.
 export interface TranscribedMetadata {
+  title: string;
   documentType: string;
   date: string;
   authors: string[];
@@ -114,40 +120,45 @@ const combinedSchema = z.object({
     .describe(
       "The full diplomatic transcription following every formatting rule in the instructions above. Use the document's own paragraphing, punctuation, and underlining; bracket low-confidence readings with a trailing question mark; place annotations and marginal notes at the end.",
     ),
+  title: z
+    .string()
+    .describe(
+      "A concise descriptive catalog title for the document, naming the principal correspondents or topic (e.g. \"Marks, William D. to Edison, Thomas A.\" or \"Notebook entry on lamp filament tests\"). Do not include the Doc ID or Folder ID. Use \"Unknown\" only when the document is illegible.",
+    ),
   documentType: z
     .string()
     .describe(
-      'Document type such as "correspondence", "telegram", "notebook page", "ledger", "memorandum", or "Unknown" if unclear.',
+      'Single document type, lowercase, from this controlled list when applicable: "correspondence", "telegram", "notebook page", "ledger", "memorandum", "legal document", "financial statement", "drawing", "printed material". Use "Unknown" only if it cannot be determined.',
     ),
   date: z
     .string()
     .describe(
-      'Document date as YYYY-MM-DD when fully known, YYYY-MM or YYYY when partial, or "Unknown".',
+      'Document date in ISO form: YYYY-MM-DD when the full date is known, YYYY-MM or YYYY when only partial, or "Unknown". Never invent a date that is not supported by the document.',
     ),
   authors: z
     .array(z.string())
     .describe(
-      'People who wrote or signed the document. Use "Last, First" form. Empty array if none.',
+      'People or organizations who wrote or signed the document, each as "Last, First Middle" (organizations written as-is). Empty array if none can be identified.',
     ),
   recipients: z
     .array(z.string())
     .describe(
-      'People the document is addressed to. Use "Last, First" form. Empty array if none.',
+      'People or organizations the document is addressed to, each as "Last, First Middle". Empty array if none can be identified.',
     ),
   mentionedNames: z
     .array(z.string())
     .describe(
-      "People, organizations, or places named in the body that are not authors or recipients. Empty array if none.",
+      'People, organizations, or places named in the body that are not the author or recipient. People as "Last, First"; organizations and places as written. Empty array if none.',
     ),
   subjects: z
     .array(z.string())
     .describe(
-      "Short-form subject tags drawn from the text. 1-6 entries. Empty array if none.",
+      "1-6 concrete topical subject tags drawn from the document content (e.g. \"electric lighting\", \"patent litigation\", \"phonograph\"). Prefer specific Edison-domain topics over generic words. Empty array if none can be determined; never use placeholder text.",
     ),
 });
 
 const METADATA_INSTRUCTION =
-  "After transcribing, also index the document: identify the document type, the date (Year-Month-Day when known), the author(s) and recipient(s) using last-name-first form, other names mentioned, and a few short-form subject tags. Return everything in the structured fields provided.";
+  "After transcribing, index the document for the Dublin Core catalog: a descriptive title, the document type, the date (ISO Year-Month-Day when known), the author(s) and recipient(s) in last-name-first form, other names mentioned, and a few concrete topical subject tags. Base every field strictly on the document; leave a field empty or \"Unknown\" rather than guessing. Return everything in the structured fields provided.";
 
 export async function transcribeDocument(
   input: TranscribeDocumentInput,
@@ -161,6 +172,17 @@ export async function transcribeDocument(
 
   const model = input.model ?? getDefaultOcrModel();
   const activePrompt = getActivePrompt(input.promptTask ?? "diplomatic-transcription");
+
+  const localOcrUrl = getLocalOcrUrl();
+  if (localOcrUrl) {
+    const { signal, cleanup } = combineSignals(input.signal, getRequestTimeoutMs());
+    try {
+      return await transcribeWithLocalOcr(input, localOcrUrl, signal);
+    } finally {
+      cleanup();
+    }
+  }
+
   const mediaPart =
     mediaType === SUPPORTED_PDF_MIME_TYPE
       ? ({
@@ -207,6 +229,7 @@ export async function transcribeDocument(
       metadata:
         ocrText.length > 0
           ? {
+              title: result.output.title || "",
               documentType: result.output.documentType || "Unknown",
               date: result.output.date || "Unknown",
               authors: result.output.authors ?? [],

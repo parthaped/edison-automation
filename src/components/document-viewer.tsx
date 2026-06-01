@@ -1324,9 +1324,9 @@ function TranscriptionPane({
           <span className="text-[10px] font-semibold uppercase tracking-wide text-amber-800">
             Uncertain ({uncertain.length})
           </span>
-          {uncertain.map((token) => (
+          {uncertain.map((token, index) => (
             <button
-              key={token}
+              key={`${token}-${index}`}
               type="button"
               onClick={() => onSelectUncertain(token)}
               className="inline-flex items-center rounded-sm border border-amber-300/80 bg-white px-2 py-0.5 font-mono text-[11px] text-amber-900 transition-colors hover:bg-amber-50"

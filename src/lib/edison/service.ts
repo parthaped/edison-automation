@@ -1,15 +1,21 @@
 import { AppError } from "./app-error";
 import { buildAuditTrail, type AuditEvent } from "./audit";
+import { extractUncertainReadings, gradeTranscription } from "./confidence";
 import { createDocumentPackage } from "./extraction";
-import { buildOmekaCsv, buildOmekaCsvRow } from "./omeka-export";
+import { buildExportCsv, buildExportCsvRow } from "./export-csv";
 import { getActivePrompt } from "./prompts";
+import type { TranscribedMetadata } from "./transcribe";
 import type {
   DashboardSummary,
-  DocumentRecords,
   EdisonRepository,
   ReviewCase,
 } from "./repositories";
-import { summarizeDocuments } from "./repositories";
+import {
+  buildReviewCase,
+  emptyMetadata,
+  emptyTranscription,
+  summarizeDocuments,
+} from "./repositories";
 import type {
   ConfidenceBucket,
   DocumentPackage,
@@ -78,100 +84,38 @@ export interface ProcessSourceFileResult {
   confidenceReasons: string[];
 }
 
-interface ConfidenceInput {
-  pageCount: number;
-  extractionErrors: number;
-  uncertainReadings: number;
-  modelDisagreements: number;
-  ocrTextLength: number;
+// Re-exported so existing call sites and tests can keep importing the grader
+// from the service module; the implementation lives in ./confidence.
+export { scoreConfidence } from "./confidence";
+
+export function resolvePersistedDocumentStatus(
+  documentPackage: DocumentPackage,
+): DocumentPackage {
+  if (documentPackage.status === "queued" && documentPackage.pages.length > 0) {
+    return { ...documentPackage, status: "needs_review" };
+  }
+  return documentPackage;
 }
 
-interface ConfidenceResult {
-  bucket: ConfidenceBucket;
-  score: number;
-  reasons: string[];
-}
-
-export function scoreConfidence(input: ConfidenceInput): ConfidenceResult {
-  const reasons: string[] = [];
-
-  if (input.extractionErrors > 0 || input.pageCount === 0) {
-    return {
-      bucket: "blocked",
-      score: 0,
-      reasons: ["Extraction failed or produced no reviewable pages."],
-    };
+export function mergeTranscribedMetadata(
+  processed: MetadataExtraction,
+  transcribed?: TranscribedMetadata,
+): MetadataExtraction {
+  if (!transcribed) {
+    return processed;
   }
-
-  let score = 100;
-
-  if (input.ocrTextLength < 80) {
-    score -= 25;
-    reasons.push("OCR text is very short for the extracted page count.");
-  }
-
-  if (input.uncertainReadings > 0) {
-    const penalty = Math.min(30, input.uncertainReadings * 4);
-    score -= penalty;
-    reasons.push(`${input.uncertainReadings} uncertain readings need review.`);
-  }
-
-  if (input.modelDisagreements > 0) {
-    const penalty = Math.min(25, input.modelDisagreements * 8);
-    score -= penalty;
-    reasons.push(`${input.modelDisagreements} model disagreements were detected.`);
-  }
-
-  if (input.pageCount > 20) {
-    score -= 5;
-    reasons.push("Large document packages receive extra review scrutiny.");
-  }
-
-  const bucket: ConfidenceBucket =
-    score >= 85 ? "high" : score >= 55 ? "medium" : "low";
-
   return {
-    bucket,
-    score: Math.max(0, score),
-    reasons: reasons.length > 0 ? reasons : ["Clean extraction and low uncertainty."],
-  };
-}
-
-function extractUncertainReadings(text: string): string[] {
-  return text.match(/\[[^\]]+\?\]/g) ?? [];
-}
-
-// Derives the review case from an already-loaded records snapshot. Mirrors the
-// repository-level getReviewCase logic but avoids an extra store read when the
-// caller has the records in hand.
-function buildReviewCaseFromRecords(
-  records: DocumentRecords,
-  documentId?: string,
-): ReviewCase | null {
-  const allDocuments = records.documents;
-  if (allDocuments.length === 0) return null;
-
-  const reviewable = allDocuments.filter((document) =>
-    ["needs_review", "blocked"].includes(document.status),
-  );
-  const documents = reviewable.length > 0 ? reviewable : allDocuments;
-  const selected =
-    documents.find((document) => document.documentId === documentId) ??
-    documents[0];
-
-  const transcriptions: Record<string, TranscriptionRun> = {};
-  const metadata: Record<string, MetadataExtraction> = {};
-  for (const document of documents) {
-    transcriptions[document.documentId] =
-      records.transcriptions[document.documentId];
-    metadata[document.documentId] = records.metadata[document.documentId];
-  }
-
-  return {
-    documents,
-    selectedDocumentId: selected.documentId,
-    transcriptions,
-    metadata,
+    ...processed,
+    title: transcribed.title?.trim() || processed.title,
+    documentType: transcribed.documentType || "Unknown",
+    date: transcribed.date || "Unknown",
+    authors: transcribed.authors,
+    recipients: transcribed.recipients,
+    mentionedNames: transcribed.mentionedNames,
+    subjects:
+      transcribed.subjects.length > 0
+        ? transcribed.subjects
+        : processed.subjects,
   };
 }
 
@@ -195,7 +139,7 @@ export async function processSourceFile(
   for (const entry of input.pageImageUrls ?? []) {
     urlByPageIndex.set(entry.pageIndex, entry);
   }
-  const documentPackage: DocumentPackage =
+  const packageWithUrls: DocumentPackage =
     urlByPageIndex.size > 0 && built.pages.length > 0
       ? {
           ...built,
@@ -212,17 +156,21 @@ export async function processSourceFile(
         }
       : built;
 
-  const blocked = documentPackage.status === "blocked";
+  const blocked = packageWithUrls.status === "blocked";
   const rawOcrText = input.rawOcrText ?? "";
   const cleanedText = rawOcrText.trim();
   const uncertainReadings = blocked ? [] : extractUncertainReadings(cleanedText);
-  const confidenceResult = scoreConfidence({
-    pageCount: documentPackage.pages.length,
-    extractionErrors: blocked ? 1 : 0,
+  const confidenceResult = gradeTranscription({
+    pageCount: packageWithUrls.pages.length,
+    blocked,
+    text: cleanedText,
     uncertainReadings: uncertainReadings.length,
-    modelDisagreements: 0,
-    ocrTextLength: cleanedText.length,
   });
+
+  const documentPackage: DocumentPackage = {
+    ...packageWithUrls,
+    confidence: confidenceResult.bucket,
+  };
 
   const diplomaticPrompt = getActivePrompt("diplomatic-transcription");
   const transcription: TranscriptionRun = {
@@ -238,12 +186,13 @@ export async function processSourceFile(
   const metadata: MetadataExtraction = {
     folderId: documentPackage.folderId,
     documentId: documentPackage.documentId,
+    title: documentPackage.title,
     documentType: "Unknown",
     date: "Unknown",
     authors: [],
     recipients: [],
     mentionedNames: [],
-    subjects: blocked ? [] : ["Needs review"],
+    subjects: [],
     imageNames: documentPackage.pages.map((page) => page.imageFilename),
     confidence: confidenceResult.bucket,
   };
@@ -279,7 +228,7 @@ export class EdisonAutomationService {
     const records = await this.repository.listDocumentRecords();
     return {
       summary: summarizeDocuments(records.documents),
-      reviewCase: buildReviewCaseFromRecords(records, documentId),
+      reviewCase: buildReviewCase(records, documentId),
     };
   }
 
@@ -301,6 +250,26 @@ export class EdisonAutomationService {
       documentId,
       diplomaticText,
     );
+    if (!updated) {
+      throw new AppError("NOT_FOUND", "Document was not found.", 404);
+    }
+    return updated;
+  }
+
+  async approveDocument(documentId: string) {
+    const record = await this.repository.getDocumentRecord(documentId);
+    if (!record) {
+      throw new AppError("NOT_FOUND", "Document was not found.", 404);
+    }
+    if (record.document.status === "blocked") {
+      throw new AppError(
+        "BAD_REQUEST",
+        "Blocked documents cannot be approved for export.",
+        409,
+      );
+    }
+
+    const updated = await this.repository.approveDocument(documentId);
     if (!updated) {
       throw new AppError("NOT_FOUND", "Document was not found.", 404);
     }
@@ -337,7 +306,7 @@ export class EdisonAutomationService {
     return buildBatchZip(rows);
   }
 
-  async exportOmekaCsv(): Promise<string> {
+  async exportTranscriptionsCsv(): Promise<string> {
     const rows = await this.repository.listApprovedExportRows();
     if (rows.length === 0) {
       throw new AppError(
@@ -347,8 +316,8 @@ export class EdisonAutomationService {
       );
     }
 
-    return buildOmekaCsv(
-      rows.map((row) => buildOmekaCsvRow(row.metadata, row.transcription)),
+    return buildExportCsv(
+      rows.map((row) => buildExportCsvRow(row.metadata, row.transcription)),
     );
   }
 }
@@ -364,8 +333,8 @@ async function buildBatchZip(rows: BatchExportRow[]): Promise<{
 
   zip.file(
     "index.csv",
-    buildOmekaCsv(
-      rows.map((row) => buildOmekaCsvRow(row.metadata, row.transcription)),
+    buildExportCsv(
+      rows.map((row) => buildExportCsvRow(row.metadata, row.transcription)),
     ),
   );
   zip.file(
@@ -397,7 +366,7 @@ async function buildBatchZip(rows: BatchExportRow[]): Promise<{
       `Documents: ${rows.length}`,
       "",
       "Files:",
-      "- index.csv             Omeka-compatible CSV index",
+      "- index.csv             CSV index of transcriptions and metadata",
       "- manifest.json         Full structured metadata + transcription JSON",
       "- <documentId>/         Per-document folder",
       "    transcription.txt   Diplomatic transcription as plain text",
@@ -432,29 +401,3 @@ async function buildBatchZip(rows: BatchExportRow[]): Promise<{
   };
 }
 
-function emptyTranscription(documentId: string): TranscriptionRun {
-  return {
-    id: `${documentId}-pending-transcription`,
-    documentId,
-    model: "not-run",
-    promptVersion: "not-run",
-    ocrText: "",
-    diplomaticText: "",
-    uncertainReadings: [],
-  };
-}
-
-function emptyMetadata(document: DocumentPackage): MetadataExtraction {
-  return {
-    folderId: document.folderId,
-    documentId: document.documentId,
-    documentType: "Unknown",
-    date: "Unknown",
-    authors: [],
-    recipients: [],
-    mentionedNames: [],
-    subjects: [],
-    imageNames: document.pages.map((page) => page.imageFilename),
-    confidence: document.confidence,
-  };
-}

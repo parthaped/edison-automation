@@ -1,7 +1,13 @@
 import { PDFDocument } from "pdf-lib";
 import { describe, expect, it } from "vitest";
 import { InMemoryEdisonRepository } from "./in-memory-repository";
-import { EdisonAutomationService, processSourceFile } from "./service";
+import {
+  EdisonAutomationService,
+  mergeTranscribedMetadata,
+  processSourceFile,
+  resolvePersistedDocumentStatus,
+} from "./service";
+import type { DocumentPackage, MetadataExtraction } from "./types";
 
 async function makeUploadFile(name: string, type: string): Promise<File> {
   return makeMultiPageUploadFile(name, type, 1);
@@ -145,25 +151,231 @@ describe("EdisonAutomationService", () => {
   it("refuses to export when no documents are approved", async () => {
     const service = new EdisonAutomationService(new InMemoryEdisonRepository(true));
 
-    await expect(service.exportOmekaCsv()).rejects.toMatchObject({
+    await expect(service.exportTranscriptionsCsv()).rejects.toMatchObject({
       code: "EXPORT_FAILED",
       status: 409,
     });
   });
 
-  it("exports only approved records to the Omeka CSV", async () => {
+  it("exports only approved records to the transcriptions CSV", async () => {
     const repository = new InMemoryEdisonRepository(true);
     const service = new EdisonAutomationService(repository);
-    const documents = await repository.listDocuments();
-    const target = documents.find((document) => document.documentId === "D9032-00001");
-    if (!target) {
-      throw new Error("Seed data must include D9032-00001 for this test.");
-    }
-    await repository.saveDocuments([{ ...target, status: "approved" }]);
 
-    const csv = await service.exportOmekaCsv();
+    const approved = await service.approveDocument("D9032-00001");
+    expect(approved.status).toBe("approved");
 
-    expect(csv).toContain("Folder ID,Doc ID");
+    const csv = await service.exportTranscriptionsCsv();
+
+    expect(csv.split("\n")[0]).toBe(
+      "Doc ID,Folder ID,Title,Document Type,Date,Author(s),Recipient(s),Name Mentions,Subjects,Image name(s),Confidence,Transcription",
+    );
+    expect(csv).toContain("D9032-00001");
     expect(csv).toContain("D9032-F");
+  });
+
+  it("refuses to approve a blocked document", async () => {
+    const repository = new InMemoryEdisonRepository(true);
+    const service = new EdisonAutomationService(repository);
+
+    await expect(
+      service.approveDocument("NEW-D8501-00003"),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST", status: 409 });
+  });
+
+  it("throws NOT_FOUND when approving an unknown document", async () => {
+    const service = new EdisonAutomationService(new InMemoryEdisonRepository(true));
+
+    await expect(service.approveDocument("does-not-exist")).rejects.toMatchObject({
+      code: "NOT_FOUND",
+      status: 404,
+    });
+  });
+});
+
+describe("processSourceFile confidence", () => {
+  it("syncs scored confidence onto documentPackage and metadata", async () => {
+    const bytes = new Uint8Array([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, ...new Array(56).fill(0),
+    ]);
+    const rawOcrText = "[a?] [b?] [c?] [d?] [e?] [f?] [g?]";
+
+    const result = await processSourceFile({
+      sourceFile: {
+        id: "src-conf",
+        name: "letter.png",
+        size: bytes.byteLength,
+        mimeType: "image/png",
+      },
+      bytes,
+      folderId: "D9032-F",
+      batchIndex: 1,
+      existingIds: new Set(),
+      rawOcrText,
+    });
+
+    expect(result.documentPackage.confidence).toBe("low");
+    expect(result.metadata.confidence).toBe("low");
+    expect(result.confidence).toBe("low");
+  });
+
+  it("marks blocked packages with blocked confidence on document and metadata", async () => {
+    const result = await processSourceFile({
+      sourceFile: {
+        id: "src-blocked",
+        name: "scan.bin",
+        size: 32,
+        mimeType: "application/octet-stream",
+      },
+      bytes: new Uint8Array(32),
+      batchIndex: 1,
+      existingIds: new Set(),
+    });
+
+    expect(result.documentPackage.status).toBe("blocked");
+    expect(result.documentPackage.confidence).toBe("blocked");
+    expect(result.metadata.confidence).toBe("blocked");
+  });
+
+  it("deduplicates uncertain readings in transcription output", async () => {
+    const bytes = new Uint8Array([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, ...new Array(56).fill(0),
+    ]);
+    const result = await processSourceFile({
+      sourceFile: {
+        id: "src-dedupe",
+        name: "letter.png",
+        size: bytes.byteLength,
+        mimeType: "image/png",
+      },
+      bytes,
+      batchIndex: 1,
+      existingIds: new Set(),
+      rawOcrText:
+        "Edison Electric Light Co. reports on the [filament?] tests and [filament?] again.",
+    });
+
+    expect(result.transcription.uncertainReadings).toEqual(["[filament?]"]);
+  });
+
+  it("uses the last pageImageUrl when duplicate pageIndex entries are supplied", async () => {
+    const file = await makeUploadFile("dup-pages.pdf", "application/pdf");
+    const bytes = new Uint8Array(await file.arrayBuffer());
+
+    const result = await processSourceFile({
+      sourceFile: {
+        id: "src-dup-url",
+        name: file.name,
+        size: file.size,
+        mimeType: file.type,
+      },
+      bytes,
+      batchIndex: 1,
+      existingIds: new Set(),
+      pageImageUrls: [
+        { pageIndex: 0, url: "https://blob.example/first.jpg" },
+        { pageIndex: 0, url: "https://blob.example/last.jpg" },
+      ],
+    });
+
+    expect(result.documentPackage.pages[0]?.originalUrl).toBe(
+      "https://blob.example/last.jpg",
+    );
+  });
+});
+
+describe("resolvePersistedDocumentStatus", () => {
+  const basePackage = (overrides: Partial<DocumentPackage>): DocumentPackage => ({
+    id: "DOC-1",
+    folderId: "F-1",
+    documentId: "DOC-1",
+    title: "Test",
+    sourceFile: {
+      id: "sf-1",
+      name: "test.pdf",
+      size: 100,
+      mimeType: "application/pdf",
+    },
+    pages: [
+      {
+        id: "DOC-1-page-1",
+        documentId: "DOC-1",
+        pageIndex: 0,
+        imageFilename: "DOC-1/test_0001.jpg",
+        sourcePage: 1,
+      },
+    ],
+    status: "queued",
+    confidence: "medium",
+    validationWarnings: [],
+    uncertaintyNotes: [],
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+    ...overrides,
+  });
+
+  it("promotes queued packages with pages to needs_review", () => {
+    const result = resolvePersistedDocumentStatus(basePackage({}));
+    expect(result.status).toBe("needs_review");
+  });
+
+  it("leaves blocked packages with no pages unchanged", () => {
+    const result = resolvePersistedDocumentStatus(
+      basePackage({ status: "blocked", pages: [], confidence: "blocked" }),
+    );
+    expect(result.status).toBe("blocked");
+  });
+
+  it("leaves already needs_review packages unchanged", () => {
+    const result = resolvePersistedDocumentStatus(
+      basePackage({ status: "needs_review" }),
+    );
+    expect(result.status).toBe("needs_review");
+  });
+});
+
+describe("mergeTranscribedMetadata", () => {
+  const processed: MetadataExtraction = {
+    folderId: "D9032-F",
+    documentId: "D9032-00001",
+    title: "[D9032-00001]",
+    documentType: "Unknown",
+    date: "Unknown",
+    authors: [],
+    recipients: [],
+    mentionedNames: [],
+    subjects: [],
+    imageNames: ["page.jpg"],
+    confidence: "medium",
+  };
+
+  it("falls back to the processed subjects when AI returns an empty array", () => {
+    const merged = mergeTranscribedMetadata(processed, {
+      title: "Marks to Edison",
+      documentType: "correspondence",
+      date: "1890",
+      authors: ["Edison, Thomas A."],
+      recipients: [],
+      mentionedNames: [],
+      subjects: [],
+    });
+
+    expect(merged.subjects).toEqual([]);
+    expect(merged.documentType).toBe("correspondence");
+    expect(merged.title).toBe("Marks to Edison");
+  });
+
+  it("keeps the processed title when the model returns no title", () => {
+    const merged = mergeTranscribedMetadata(processed, {
+      title: "",
+      documentType: "correspondence",
+      date: "1890",
+      authors: [],
+      recipients: [],
+      mentionedNames: [],
+      subjects: ["Electric light"],
+    });
+
+    expect(merged.title).toBe("[D9032-00001]");
+    expect(merged.subjects).toEqual(["Electric light"]);
   });
 });

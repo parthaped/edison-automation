@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { processSourceFile, scoreConfidence } from "../service";
+import {
+  mergeTranscribedMetadata,
+  processSourceFile,
+  resolvePersistedDocumentStatus,
+  scoreConfidence,
+} from "../service";
 import type { SourceFile } from "../types";
 
 describe("processSourceFile (workflow building block)", () => {
@@ -18,6 +23,7 @@ describe("processSourceFile (workflow building block)", () => {
     });
     expect(result.documentPackage.status).toBe("blocked");
     expect(result.confidence).toBe("blocked");
+    expect(result.documentPackage.confidence).toBe("blocked");
   });
 
   it("produces a deterministic document id when an OCR text is available", async () => {
@@ -51,22 +57,22 @@ describe("scoreConfidence", () => {
       pageCount: 0,
       extractionErrors: 0,
       uncertainReadings: 0,
-      modelDisagreements: 0,
+      wordCount: 0,
       ocrTextLength: 0,
     });
     expect(result.bucket).toBe("blocked");
   });
 
-  it("penalizes uncertain readings", () => {
+  it("penalizes a high density of uncertain readings", () => {
     const result = scoreConfidence({
       pageCount: 2,
       extractionErrors: 0,
       uncertainReadings: 5,
-      modelDisagreements: 0,
+      wordCount: 80,
       ocrTextLength: 1000,
     });
     expect(result.bucket === "medium" || result.bucket === "low").toBe(true);
-    expect(result.reasons.join(" ")).toMatch(/uncertain readings/);
+    expect(result.reasons.join(" ")).toMatch(/uncertain reading/);
   });
 
   it("returns high confidence for clean extractions", () => {
@@ -74,9 +80,66 @@ describe("scoreConfidence", () => {
       pageCount: 2,
       extractionErrors: 0,
       uncertainReadings: 0,
-      modelDisagreements: 0,
+      wordCount: 400,
       ocrTextLength: 2000,
     });
     expect(result.bucket).toBe("high");
+  });
+});
+
+describe("mergeTranscribedMetadata (persist step)", () => {
+  it("leaves subjects empty when transcribed metadata has none", () => {
+    const merged = mergeTranscribedMetadata(
+      {
+        folderId: "D9032-F",
+        documentId: "D9032-00001",
+        title: "[D9032-00001]",
+        documentType: "Unknown",
+        date: "Unknown",
+        authors: [],
+        recipients: [],
+        mentionedNames: [],
+        subjects: [],
+        imageNames: [],
+        confidence: "medium",
+      },
+      {
+        title: "Marks to Edison",
+        documentType: "correspondence",
+        date: "1890",
+        authors: [],
+        recipients: [],
+        mentionedNames: [],
+        subjects: [],
+      },
+    );
+
+    expect(merged.subjects).toEqual([]);
+    expect(merged.title).toBe("Marks to Edison");
+  });
+});
+
+describe("resolvePersistedDocumentStatus (persist step)", () => {
+  it("promotes extracted queued documents without requiring OCR text", async () => {
+    const sourceFile: SourceFile = {
+      id: "src-3",
+      name: "letter.png",
+      size: 64,
+      mimeType: "image/png",
+    };
+    const bytes = new Uint8Array([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, ...new Array(56).fill(0),
+    ]);
+    const processed = await processSourceFile({
+      sourceFile,
+      bytes,
+      batchIndex: 1,
+      existingIds: new Set(),
+    });
+
+    expect(processed.documentPackage.status).toBe("queued");
+
+    const persisted = resolvePersistedDocumentStatus(processed.documentPackage);
+    expect(persisted.status).toBe("needs_review");
   });
 });

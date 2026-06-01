@@ -6,12 +6,12 @@ export const runtime = "nodejs";
 
 export async function GET() {
   try {
-    const csv = await getEdisonService().exportOmekaCsv();
+    const csv = await getEdisonService().exportTranscriptionsCsv();
 
     return new NextResponse(csv, {
       headers: {
         "content-type": "text/csv; charset=utf-8",
-        "content-disposition": 'attachment; filename="omeka-export.csv"',
+        "content-disposition": 'attachment; filename="edison-transcriptions.csv"',
       },
     });
   } catch (error) {

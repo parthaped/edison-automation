@@ -32,7 +32,11 @@ export default async function ReviewPage({ searchParams }: ReviewPageProps) {
               documents={reviewCase.documents}
               transcriptions={reviewCase.transcriptions}
               metadata={reviewCase.metadata}
-              initialDocumentId={doc ?? reviewCase.selectedDocumentId}
+              initialDocumentId={
+                doc && reviewCase.documents.some((d) => d.documentId === doc)
+                  ? doc
+                  : reviewCase.selectedDocumentId
+              }
             />
           </div>
         ) : (
@@ -63,6 +67,7 @@ function ConfidenceCounts({
   summary,
 }: {
   summary: {
+    highConfidence: number;
     lowConfidence: number;
     mediumConfidence: number;
     blocked: number;
@@ -70,13 +75,14 @@ function ConfidenceCounts({
   };
 }) {
   const cells: Array<{ label: string; count: number; dot: string }> = [
-    { label: "Low", count: summary.lowConfidence, dot: "bg-rose-500" },
+    { label: "High", count: summary.highConfidence, dot: "bg-emerald-500" },
     { label: "Medium", count: summary.mediumConfidence, dot: "bg-amber-500" },
+    { label: "Low", count: summary.lowConfidence, dot: "bg-rose-500" },
     { label: "Blocked", count: summary.blocked, dot: "bg-slate-400" },
     {
       label: "Ready",
       count: summary.readyToExport,
-      dot: "bg-emerald-500",
+      dot: "bg-sky-500",
     },
   ];
   return (

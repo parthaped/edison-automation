@@ -7,7 +7,7 @@ import {
 import { assignDocumentId, normalizeFolderId } from "../id-policy";
 import type { BatchEvent } from "../ingest-job-store";
 import { rasterizePdfPages } from "../rasterize-pdf";
-import { processSourceFile } from "../service";
+import { processSourceFile, mergeTranscribedMetadata, resolvePersistedDocumentStatus } from "../service";
 import type {
   ManualIngestResult,
   PageImageUrl,
@@ -434,23 +434,14 @@ async function persistFileStep(
     inputTokens: input.inputTokens ?? processed.transcription.inputTokens,
     outputTokens: input.outputTokens ?? processed.transcription.outputTokens,
   };
-  const documentPackage: DocumentPackage =
-    ocrText !== undefined && processed.documentPackage.status === "queued"
-      ? { ...processed.documentPackage, status: "needs_review" }
-      : processed.documentPackage;
+  const documentPackage: DocumentPackage = resolvePersistedDocumentStatus(
+    processed.documentPackage,
+  );
 
-  // Merge the structured metadata the model returned in the transcription call.
-  const metadata: MetadataExtraction = input.metadata
-    ? {
-        ...processed.metadata,
-        documentType: input.metadata.documentType || "Unknown",
-        date: input.metadata.date || "Unknown",
-        authors: input.metadata.authors,
-        recipients: input.metadata.recipients,
-        mentionedNames: input.metadata.mentionedNames,
-        subjects: input.metadata.subjects,
-      }
-    : processed.metadata;
+  const metadata: MetadataExtraction = mergeTranscribedMetadata(
+    processed.metadata,
+    input.metadata,
+  );
 
   await getEdisonService()
     .getRepository()
