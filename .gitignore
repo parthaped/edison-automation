@@ -36,6 +36,9 @@ yarn-error.log*
 # vercel
 .vercel
 
+# local ML cache and generated manifests (not tracked in repo)
+/ml/data/
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts
