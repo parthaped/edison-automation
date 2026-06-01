@@ -1,7 +1,13 @@
 import { PDFDocument } from "pdf-lib";
 import { describe, expect, it } from "vitest";
 import { InMemoryEdisonRepository } from "./in-memory-repository";
-import { EdisonAutomationService, processSourceFile } from "./service";
+import {
+  EdisonAutomationService,
+  mergeTranscribedMetadata,
+  processSourceFile,
+  resolvePersistedDocumentStatus,
+} from "./service";
+import type { DocumentPackage, MetadataExtraction } from "./types";
 
 async function makeUploadFile(name: string, type: string): Promise<File> {
   return makeMultiPageUploadFile(name, type, 1);
@@ -165,5 +171,188 @@ describe("EdisonAutomationService", () => {
 
     expect(csv).toContain("Folder ID,Doc ID");
     expect(csv).toContain("D9032-F");
+  });
+});
+
+describe("processSourceFile confidence", () => {
+  it("syncs scored confidence onto documentPackage and metadata", async () => {
+    const bytes = new Uint8Array([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, ...new Array(56).fill(0),
+    ]);
+    const rawOcrText = "[a?] [b?] [c?] [d?] [e?] [f?] [g?]";
+
+    const result = await processSourceFile({
+      sourceFile: {
+        id: "src-conf",
+        name: "letter.png",
+        size: bytes.byteLength,
+        mimeType: "image/png",
+      },
+      bytes,
+      folderId: "D9032-F",
+      batchIndex: 1,
+      existingIds: new Set(),
+      rawOcrText,
+    });
+
+    expect(result.documentPackage.confidence).toBe("low");
+    expect(result.metadata.confidence).toBe("low");
+    expect(result.confidence).toBe("low");
+  });
+
+  it("marks blocked packages with blocked confidence on document and metadata", async () => {
+    const result = await processSourceFile({
+      sourceFile: {
+        id: "src-blocked",
+        name: "scan.bin",
+        size: 32,
+        mimeType: "application/octet-stream",
+      },
+      bytes: new Uint8Array(32),
+      batchIndex: 1,
+      existingIds: new Set(),
+    });
+
+    expect(result.documentPackage.status).toBe("blocked");
+    expect(result.documentPackage.confidence).toBe("blocked");
+    expect(result.metadata.confidence).toBe("blocked");
+  });
+
+  it("deduplicates uncertain readings in transcription output", async () => {
+    const bytes = new Uint8Array([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, ...new Array(56).fill(0),
+    ]);
+    const result = await processSourceFile({
+      sourceFile: {
+        id: "src-dedupe",
+        name: "letter.png",
+        size: bytes.byteLength,
+        mimeType: "image/png",
+      },
+      bytes,
+      batchIndex: 1,
+      existingIds: new Set(),
+      rawOcrText:
+        "Edison Electric Light Co. reports on the [filament?] tests and [filament?] again.",
+    });
+
+    expect(result.transcription.uncertainReadings).toEqual(["[filament?]"]);
+  });
+
+  it("uses the last pageImageUrl when duplicate pageIndex entries are supplied", async () => {
+    const file = await makeUploadFile("dup-pages.pdf", "application/pdf");
+    const bytes = new Uint8Array(await file.arrayBuffer());
+
+    const result = await processSourceFile({
+      sourceFile: {
+        id: "src-dup-url",
+        name: file.name,
+        size: file.size,
+        mimeType: file.type,
+      },
+      bytes,
+      batchIndex: 1,
+      existingIds: new Set(),
+      pageImageUrls: [
+        { pageIndex: 0, url: "https://blob.example/first.jpg" },
+        { pageIndex: 0, url: "https://blob.example/last.jpg" },
+      ],
+    });
+
+    expect(result.documentPackage.pages[0]?.originalUrl).toBe(
+      "https://blob.example/last.jpg",
+    );
+  });
+});
+
+describe("resolvePersistedDocumentStatus", () => {
+  const basePackage = (overrides: Partial<DocumentPackage>): DocumentPackage => ({
+    id: "DOC-1",
+    folderId: "F-1",
+    documentId: "DOC-1",
+    title: "Test",
+    sourceFile: {
+      id: "sf-1",
+      name: "test.pdf",
+      size: 100,
+      mimeType: "application/pdf",
+    },
+    pages: [
+      {
+        id: "DOC-1-page-1",
+        documentId: "DOC-1",
+        pageIndex: 0,
+        imageFilename: "DOC-1/test_0001.jpg",
+        sourcePage: 1,
+      },
+    ],
+    status: "queued",
+    confidence: "medium",
+    validationWarnings: [],
+    uncertaintyNotes: [],
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+    ...overrides,
+  });
+
+  it("promotes queued packages with pages to needs_review", () => {
+    const result = resolvePersistedDocumentStatus(basePackage({}));
+    expect(result.status).toBe("needs_review");
+  });
+
+  it("leaves blocked packages with no pages unchanged", () => {
+    const result = resolvePersistedDocumentStatus(
+      basePackage({ status: "blocked", pages: [], confidence: "blocked" }),
+    );
+    expect(result.status).toBe("blocked");
+  });
+
+  it("leaves already needs_review packages unchanged", () => {
+    const result = resolvePersistedDocumentStatus(
+      basePackage({ status: "needs_review" }),
+    );
+    expect(result.status).toBe("needs_review");
+  });
+});
+
+describe("mergeTranscribedMetadata", () => {
+  const processed: MetadataExtraction = {
+    folderId: "D9032-F",
+    documentId: "D9032-00001",
+    documentType: "Unknown",
+    date: "Unknown",
+    authors: [],
+    recipients: [],
+    mentionedNames: [],
+    subjects: ["Needs review"],
+    imageNames: ["page.jpg"],
+    confidence: "medium",
+  };
+
+  it("preserves default subjects when AI returns an empty subjects array", () => {
+    const merged = mergeTranscribedMetadata(processed, {
+      documentType: "letter",
+      date: "1890",
+      authors: ["Edison"],
+      recipients: [],
+      mentionedNames: [],
+      subjects: [],
+    });
+
+    expect(merged.subjects).toEqual(["Needs review"]);
+    expect(merged.documentType).toBe("letter");
+  });
+
+  it("uses AI subjects when the model returned at least one", () => {
+    const merged = mergeTranscribedMetadata(processed, {
+      documentType: "letter",
+      date: "1890",
+      authors: [],
+      recipients: [],
+      mentionedNames: [],
+      subjects: ["Electric light"],
+    });
+
+    expect(merged.subjects).toEqual(["Electric light"]);
   });
 });

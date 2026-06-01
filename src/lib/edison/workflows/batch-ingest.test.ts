@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { processSourceFile, scoreConfidence } from "../service";
+import {
+  mergeTranscribedMetadata,
+  processSourceFile,
+  resolvePersistedDocumentStatus,
+  scoreConfidence,
+} from "../service";
 import type { SourceFile } from "../types";
 
 describe("processSourceFile (workflow building block)", () => {
@@ -18,6 +23,7 @@ describe("processSourceFile (workflow building block)", () => {
     });
     expect(result.documentPackage.status).toBe("blocked");
     expect(result.confidence).toBe("blocked");
+    expect(result.documentPackage.confidence).toBe("blocked");
   });
 
   it("produces a deterministic document id when an OCR text is available", async () => {
@@ -78,5 +84,59 @@ describe("scoreConfidence", () => {
       ocrTextLength: 2000,
     });
     expect(result.bucket).toBe("high");
+  });
+});
+
+describe("mergeTranscribedMetadata (persist step)", () => {
+  it("keeps default subjects when transcribed metadata is empty", () => {
+    const merged = mergeTranscribedMetadata(
+      {
+        folderId: "D9032-F",
+        documentId: "D9032-00001",
+        documentType: "Unknown",
+        date: "Unknown",
+        authors: [],
+        recipients: [],
+        mentionedNames: [],
+        subjects: ["Needs review"],
+        imageNames: [],
+        confidence: "medium",
+      },
+      {
+        documentType: "letter",
+        date: "1890",
+        authors: [],
+        recipients: [],
+        mentionedNames: [],
+        subjects: [],
+      },
+    );
+
+    expect(merged.subjects).toEqual(["Needs review"]);
+  });
+});
+
+describe("resolvePersistedDocumentStatus (persist step)", () => {
+  it("promotes extracted queued documents without requiring OCR text", async () => {
+    const sourceFile: SourceFile = {
+      id: "src-3",
+      name: "letter.png",
+      size: 64,
+      mimeType: "image/png",
+    };
+    const bytes = new Uint8Array([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, ...new Array(56).fill(0),
+    ]);
+    const processed = await processSourceFile({
+      sourceFile,
+      bytes,
+      batchIndex: 1,
+      existingIds: new Set(),
+    });
+
+    expect(processed.documentPackage.status).toBe("queued");
+
+    const persisted = resolvePersistedDocumentStatus(processed.documentPackage);
+    expect(persisted.status).toBe("needs_review");
   });
 });

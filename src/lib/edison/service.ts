@@ -3,13 +3,18 @@ import { buildAuditTrail, type AuditEvent } from "./audit";
 import { createDocumentPackage } from "./extraction";
 import { buildOmekaCsv, buildOmekaCsvRow } from "./omeka-export";
 import { getActivePrompt } from "./prompts";
+import type { TranscribedMetadata } from "./transcribe";
 import type {
   DashboardSummary,
-  DocumentRecords,
   EdisonRepository,
   ReviewCase,
 } from "./repositories";
-import { summarizeDocuments } from "./repositories";
+import {
+  buildReviewCase,
+  emptyMetadata,
+  emptyTranscription,
+  summarizeDocuments,
+} from "./repositories";
 import type {
   ConfidenceBucket,
   DocumentPackage,
@@ -138,40 +143,36 @@ export function scoreConfidence(input: ConfidenceInput): ConfidenceResult {
 }
 
 function extractUncertainReadings(text: string): string[] {
-  return text.match(/\[[^\]]+\?\]/g) ?? [];
+  return [...new Set(text.match(/\[[^\]]+\?\]/g) ?? [])];
 }
 
-// Derives the review case from an already-loaded records snapshot. Mirrors the
-// repository-level getReviewCase logic but avoids an extra store read when the
-// caller has the records in hand.
-function buildReviewCaseFromRecords(
-  records: DocumentRecords,
-  documentId?: string,
-): ReviewCase | null {
-  const allDocuments = records.documents;
-  if (allDocuments.length === 0) return null;
-
-  const reviewable = allDocuments.filter((document) =>
-    ["needs_review", "blocked"].includes(document.status),
-  );
-  const documents = reviewable.length > 0 ? reviewable : allDocuments;
-  const selected =
-    documents.find((document) => document.documentId === documentId) ??
-    documents[0];
-
-  const transcriptions: Record<string, TranscriptionRun> = {};
-  const metadata: Record<string, MetadataExtraction> = {};
-  for (const document of documents) {
-    transcriptions[document.documentId] =
-      records.transcriptions[document.documentId];
-    metadata[document.documentId] = records.metadata[document.documentId];
+export function resolvePersistedDocumentStatus(
+  documentPackage: DocumentPackage,
+): DocumentPackage {
+  if (documentPackage.status === "queued" && documentPackage.pages.length > 0) {
+    return { ...documentPackage, status: "needs_review" };
   }
+  return documentPackage;
+}
 
+export function mergeTranscribedMetadata(
+  processed: MetadataExtraction,
+  transcribed?: TranscribedMetadata,
+): MetadataExtraction {
+  if (!transcribed) {
+    return processed;
+  }
   return {
-    documents,
-    selectedDocumentId: selected.documentId,
-    transcriptions,
-    metadata,
+    ...processed,
+    documentType: transcribed.documentType || "Unknown",
+    date: transcribed.date || "Unknown",
+    authors: transcribed.authors,
+    recipients: transcribed.recipients,
+    mentionedNames: transcribed.mentionedNames,
+    subjects:
+      transcribed.subjects.length > 0
+        ? transcribed.subjects
+        : processed.subjects,
   };
 }
 
@@ -195,7 +196,7 @@ export async function processSourceFile(
   for (const entry of input.pageImageUrls ?? []) {
     urlByPageIndex.set(entry.pageIndex, entry);
   }
-  const documentPackage: DocumentPackage =
+  const packageWithUrls: DocumentPackage =
     urlByPageIndex.size > 0 && built.pages.length > 0
       ? {
           ...built,
@@ -212,17 +213,22 @@ export async function processSourceFile(
         }
       : built;
 
-  const blocked = documentPackage.status === "blocked";
+  const blocked = packageWithUrls.status === "blocked";
   const rawOcrText = input.rawOcrText ?? "";
   const cleanedText = rawOcrText.trim();
   const uncertainReadings = blocked ? [] : extractUncertainReadings(cleanedText);
   const confidenceResult = scoreConfidence({
-    pageCount: documentPackage.pages.length,
+    pageCount: packageWithUrls.pages.length,
     extractionErrors: blocked ? 1 : 0,
     uncertainReadings: uncertainReadings.length,
     modelDisagreements: 0,
     ocrTextLength: cleanedText.length,
   });
+
+  const documentPackage: DocumentPackage = {
+    ...packageWithUrls,
+    confidence: confidenceResult.bucket,
+  };
 
   const diplomaticPrompt = getActivePrompt("diplomatic-transcription");
   const transcription: TranscriptionRun = {
@@ -279,7 +285,7 @@ export class EdisonAutomationService {
     const records = await this.repository.listDocumentRecords();
     return {
       summary: summarizeDocuments(records.documents),
-      reviewCase: buildReviewCaseFromRecords(records, documentId),
+      reviewCase: buildReviewCase(records, documentId),
     };
   }
 
@@ -432,29 +438,3 @@ async function buildBatchZip(rows: BatchExportRow[]): Promise<{
   };
 }
 
-function emptyTranscription(documentId: string): TranscriptionRun {
-  return {
-    id: `${documentId}-pending-transcription`,
-    documentId,
-    model: "not-run",
-    promptVersion: "not-run",
-    ocrText: "",
-    diplomaticText: "",
-    uncertainReadings: [],
-  };
-}
-
-function emptyMetadata(document: DocumentPackage): MetadataExtraction {
-  return {
-    folderId: document.folderId,
-    documentId: document.documentId,
-    documentType: "Unknown",
-    date: "Unknown",
-    authors: [],
-    recipients: [],
-    mentionedNames: [],
-    subjects: [],
-    imageNames: document.pages.map((page) => page.imageFilename),
-    confidence: document.confidence,
-  };
-}

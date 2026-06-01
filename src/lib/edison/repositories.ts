@@ -80,3 +80,75 @@ export function summarizeDocuments(
     readyToExport: documents.filter((document) => document.status === "approved").length,
   };
 }
+
+export function emptyTranscription(documentId: string): TranscriptionRun {
+  return {
+    id: `${documentId}-pending-transcription`,
+    documentId,
+    model: "not-run",
+    promptVersion: "not-run",
+    ocrText: "",
+    diplomaticText: "",
+    uncertainReadings: [],
+  };
+}
+
+export function emptyMetadata(document: DocumentPackage): MetadataExtraction {
+  return {
+    folderId: document.folderId,
+    documentId: document.documentId,
+    documentType: "Unknown",
+    date: "Unknown",
+    authors: [],
+    recipients: [],
+    mentionedNames: [],
+    subjects: [],
+    imageNames: document.pages.map((page) => page.imageFilename),
+    confidence: document.confidence,
+  };
+}
+
+export function buildReviewCase(
+  records: DocumentRecords,
+  documentId?: string,
+): ReviewCase | null {
+  const allDocuments = records.documents;
+  if (allDocuments.length === 0) return null;
+
+  const requested = documentId
+    ? allDocuments.find((document) => document.documentId === documentId)
+    : undefined;
+
+  const reviewable = allDocuments.filter((document) =>
+    ["needs_review", "blocked"].includes(document.status),
+  );
+  let documents = reviewable.length > 0 ? reviewable : allDocuments;
+
+  if (
+    requested &&
+    !documents.some((document) => document.documentId === documentId)
+  ) {
+    documents = [requested, ...documents];
+  }
+
+  const selected =
+    documents.find((document) => document.documentId === documentId) ??
+    documents[0];
+
+  const transcriptions: Record<string, TranscriptionRun> = {};
+  const metadata: Record<string, MetadataExtraction> = {};
+  for (const document of documents) {
+    transcriptions[document.documentId] =
+      records.transcriptions[document.documentId] ??
+      emptyTranscription(document.documentId);
+    metadata[document.documentId] =
+      records.metadata[document.documentId] ?? emptyMetadata(document);
+  }
+
+  return {
+    documents,
+    selectedDocumentId: selected.documentId,
+    transcriptions,
+    metadata,
+  };
+}

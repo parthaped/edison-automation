@@ -5,6 +5,11 @@ import type {
   EdisonRepository,
   ReviewCase,
 } from "./repositories";
+import {
+  buildReviewCase,
+  emptyMetadata,
+  emptyTranscription,
+} from "./repositories";
 import type {
   DocumentPackage,
   MetadataExtraction,
@@ -123,33 +128,7 @@ export class InMemoryEdisonRepository implements EdisonRepository {
   }
 
   async getReviewCase(documentId?: string): Promise<ReviewCase | null> {
-    const allDocuments = await this.listDocuments();
-    if (allDocuments.length === 0) return null;
-
-    const reviewable = allDocuments.filter((document) =>
-      ["needs_review", "blocked"].includes(document.status),
-    );
-    const documents = reviewable.length > 0 ? reviewable : allDocuments;
-    const selected =
-      documents.find((document) => document.documentId === documentId) ??
-      documents[0];
-
-    const transcriptions: Record<string, TranscriptionRun> = {};
-    const metadata: Record<string, MetadataExtraction> = {};
-    for (const document of documents) {
-      transcriptions[document.documentId] =
-        this.transcriptions.get(document.documentId) ??
-        emptyTranscription(document.documentId);
-      metadata[document.documentId] =
-        this.metadata.get(document.documentId) ?? emptyMetadata(document);
-    }
-
-    return {
-      documents,
-      selectedDocumentId: selected.documentId,
-      transcriptions,
-      metadata,
-    };
+    return buildReviewCase(await this.listDocumentRecords(), documentId);
   }
 
   async listApprovedExportRows() {
@@ -183,31 +162,4 @@ export class InMemoryEdisonRepository implements EdisonRepository {
     }
     return rows;
   }
-}
-
-function emptyTranscription(documentId: string): TranscriptionRun {
-  return {
-    id: `${documentId}-pending-transcription`,
-    documentId,
-    model: "not-run",
-    promptVersion: "not-run",
-    ocrText: "",
-    diplomaticText: "",
-    uncertainReadings: [],
-  };
-}
-
-function emptyMetadata(document: DocumentPackage): MetadataExtraction {
-  return {
-    folderId: document.folderId,
-    documentId: document.documentId,
-    documentType: "Unknown",
-    date: "Unknown",
-    authors: [],
-    recipients: [],
-    mentionedNames: [],
-    subjects: [],
-    imageNames: document.pages.map((page) => page.imageFilename),
-    confidence: document.confidence,
-  };
 }

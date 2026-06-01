@@ -32,7 +32,11 @@ export default async function ReviewPage({ searchParams }: ReviewPageProps) {
               documents={reviewCase.documents}
               transcriptions={reviewCase.transcriptions}
               metadata={reviewCase.metadata}
-              initialDocumentId={doc ?? reviewCase.selectedDocumentId}
+              initialDocumentId={
+                doc && reviewCase.documents.some((d) => d.documentId === doc)
+                  ? doc
+                  : reviewCase.selectedDocumentId
+              }
             />
           </div>
         ) : (

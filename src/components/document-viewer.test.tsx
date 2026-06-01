@@ -131,4 +131,15 @@ describe("DocumentViewer", () => {
     const pageInput = screen.getByLabelText("Go to page") as HTMLInputElement;
     expect(pageInput.value).toBe("2");
   });
+
+  it("renders duplicate uncertain tokens with distinct chip keys", () => {
+    const transcription = {
+      ...sampleTranscription,
+      uncertainReadings: ["[filament?]", "[filament?]"],
+    };
+    renderViewer({ transcription });
+
+    const chips = screen.getAllByRole("button", { name: "[filament?]" });
+    expect(chips).toHaveLength(2);
+  });
 });

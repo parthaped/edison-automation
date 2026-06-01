@@ -5,6 +5,11 @@ import type {
   EdisonRepository,
   ReviewCase,
 } from "./repositories";
+import {
+  buildReviewCase,
+  emptyMetadata,
+  emptyTranscription,
+} from "./repositories";
 import type {
   DocumentPackage,
   MetadataExtraction,
@@ -13,9 +18,8 @@ import type {
 
 // One JSON record per document, stored at records/<documentId>.json in the
 // project's Vercel Blob store. This is durable across serverless invocations
-// without provisioning a separate database. The dataset is small (one record
-// per ingested document) so listing + reading every record per dashboard load
-// is acceptable.
+// without provisioning a separate database. Listing is paginated so large
+// datasets are not silently truncated at the API page size.
 
 const RECORD_PREFIX = "records/";
 
@@ -33,6 +37,17 @@ function documentIdFromPathname(pathname: string): string | null {
   } catch {
     return null;
   }
+}
+
+async function listAllRecordBlobs() {
+  const all: Awaited<ReturnType<typeof list>>["blobs"] = [];
+  let cursor: string | undefined;
+  do {
+    const result = await list({ prefix: RECORD_PREFIX, limit: 1000, cursor });
+    all.push(...result.blobs);
+    cursor = result.hasMore ? result.cursor : undefined;
+  } while (cursor);
+  return all;
 }
 
 export class BlobEdisonRepository implements EdisonRepository {
@@ -53,7 +68,7 @@ export class BlobEdisonRepository implements EdisonRepository {
   }
 
   private async readAllRecords(): Promise<DocumentRecord[]> {
-    const { blobs } = await list({ prefix: RECORD_PREFIX, limit: 1000 });
+    const blobs = await listAllRecordBlobs();
     const records = await Promise.all(
       blobs.map(async (blob) => {
         try {
@@ -92,7 +107,7 @@ export class BlobEdisonRepository implements EdisonRepository {
   async listDocumentIds(): Promise<string[]> {
     // Only the blob index is needed; record bodies are never fetched. The
     // document ID is encoded in the pathname (records/<id>.json).
-    const { blobs } = await list({ prefix: RECORD_PREFIX, limit: 1000 });
+    const blobs = await listAllRecordBlobs();
     return blobs
       .map((blob) => documentIdFromPathname(blob.pathname))
       .filter((id): id is string => id !== null);
@@ -182,39 +197,7 @@ export class BlobEdisonRepository implements EdisonRepository {
   }
 
   async getReviewCase(documentId?: string): Promise<ReviewCase | null> {
-    const records = await this.readAllRecords();
-    if (records.length === 0) return null;
-
-    const byId = new Map(
-      records.map((record) => [record.document.documentId, record]),
-    );
-    const allDocuments = records
-      .map((record) => record.document)
-      .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
-
-    const reviewable = allDocuments.filter((document) =>
-      ["needs_review", "blocked"].includes(document.status),
-    );
-    const documents = reviewable.length > 0 ? reviewable : allDocuments;
-    const selected =
-      documents.find((document) => document.documentId === documentId) ??
-      documents[0];
-
-    const transcriptions: Record<string, TranscriptionRun> = {};
-    const metadata: Record<string, MetadataExtraction> = {};
-    for (const document of documents) {
-      const record = byId.get(document.documentId);
-      transcriptions[document.documentId] =
-        record?.transcription ?? emptyTranscription(document.documentId);
-      metadata[document.documentId] = record?.metadata ?? emptyMetadata(document);
-    }
-
-    return {
-      documents,
-      selectedDocumentId: selected.documentId,
-      transcriptions,
-      metadata,
-    };
+    return buildReviewCase(await this.listDocumentRecords(), documentId);
   }
 
   async listApprovedExportRows() {
@@ -244,31 +227,4 @@ export class BlobEdisonRepository implements EdisonRepository {
     }
     return rows;
   }
-}
-
-function emptyTranscription(documentId: string): TranscriptionRun {
-  return {
-    id: `${documentId}-pending-transcription`,
-    documentId,
-    model: "not-run",
-    promptVersion: "not-run",
-    ocrText: "",
-    diplomaticText: "",
-    uncertainReadings: [],
-  };
-}
-
-function emptyMetadata(document: DocumentPackage): MetadataExtraction {
-  return {
-    folderId: document.folderId,
-    documentId: document.documentId,
-    documentType: "Unknown",
-    date: "Unknown",
-    authors: [],
-    recipients: [],
-    mentionedNames: [],
-    subjects: [],
-    imageNames: document.pages.map((page) => page.imageFilename),
-    confidence: document.confidence,
-  };
 }
