@@ -11,7 +11,7 @@ export async function GET() {
     return new NextResponse(csv, {
       headers: {
         "content-type": "text/csv; charset=utf-8",
-        "content-disposition": 'attachment; filename="edison-transcriptions.csv"',
+        "content-disposition": 'attachment; filename="edison-omeka-import.csv"',
       },
     });
   } catch (error) {

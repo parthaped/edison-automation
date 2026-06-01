@@ -167,7 +167,7 @@ describe("EdisonAutomationService", () => {
     const csv = await service.exportTranscriptionsCsv();
 
     expect(csv.split("\n")[0]).toBe(
-      "Doc ID,Folder ID,Title,Document Type,Date,Author(s),Recipient(s),Name Mentions,Subjects,Image name(s),Confidence,Transcription",
+      "o:id,dcterms:identifier,dcterms:title,dcterms:type,dcterms:date,dcterms:creator,dcterms:subject,dcterms:description,dcterms:source,o:media/file",
     );
     expect(csv).toContain("D9032-00001");
     expect(csv).toContain("D9032-F");

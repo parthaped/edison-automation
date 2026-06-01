@@ -125,7 +125,7 @@ export function WorkbenchSidebar() {
             strokeWidth={1.8}
             aria-hidden="true"
           />
-          Download CSV
+          Download Omeka CSV
         </a>
         <p className="px-2.5 pb-1 pt-2 text-[10px] uppercase tracking-wide text-muted-foreground">
           Rutgers University · Internal
