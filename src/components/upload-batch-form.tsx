@@ -24,6 +24,7 @@ import {
   DIRECT_INGEST_MAX_BYTES,
   inferUploadContentType,
   MAX_UPLOAD_BYTES,
+  partitionFilesIntoUploadBatches,
   shouldUseBlobMultipartUpload,
 } from "@/lib/edison/upload-constraints";
 
@@ -39,11 +40,13 @@ interface UploadProgress {
   fileName: string;
   fileIndex: number;
   totalFiles: number;
+  uploadBatchIndex: number;
+  totalUploadBatches: number;
   // Monotonic 0-100 for the current file. We never let this go backwards so
   // @vercel/blob's internal async-retry behavior doesn't show as a bouncing
   // progress bar.
   percentage: number;
-  // 0-100 across the whole batch (uploaded bytes / total bytes).
+  // 0-100 across the whole selection (uploaded bytes / total bytes).
   batchPercentage: number;
   retrying: boolean;
 }
@@ -145,51 +148,88 @@ export function UploadBatchForm({ blobReady }: UploadBatchFormProps) {
     setUploadProgress(null);
 
     try {
-      const job = blobReady
-        ? await uploadFilesToBlob(
-            files,
-            folderId,
-            promptTask,
-            abortController.signal,
-            setUploadProgress,
-            () => setStatus("finalizing"),
-          )
-        : await uploadFilesDirectly(
-            files,
-            folderId,
-            promptTask,
-            abortController.signal,
-          );
+      const uploadBatches = blobReady
+        ? partitionFilesIntoUploadBatches(files)
+        : [files];
+      const totalSelectionBytes =
+        files.reduce((sum, file) => sum + file.size, 0) || 1;
+      let bytesFromCompletedBatches = 0;
+      let fileIndexOffset = 0;
+      let mergedResult: ManualIngestResult | null = null;
+      let lastJob: IngestJobSnapshot | null = null;
 
-      setUploadProgress(null);
-      setStatus("processing");
-      setIngestJob(job);
+      for (const [batchIndex, batchFiles] of uploadBatches.entries()) {
+        const job = blobReady
+          ? await uploadFilesToBlob(
+              batchFiles,
+              folderId,
+              promptTask,
+              abortController.signal,
+              setUploadProgress,
+              () => setStatus("finalizing"),
+              {
+                totalFiles: files.length,
+                fileIndexOffset,
+                totalBytes: totalSelectionBytes,
+                bytesBeforeBatch: bytesFromCompletedBatches,
+                uploadBatchIndex: batchIndex + 1,
+                totalUploadBatches: uploadBatches.length,
+              },
+            )
+          : await uploadFilesDirectly(
+              batchFiles,
+              folderId,
+              promptTask,
+              abortController.signal,
+            );
 
-      const finalJob = await waitForIngestJob(
-        job.batchId,
-        abortController.signal,
-        setIngestJob,
-      );
+        setUploadProgress(null);
+        setStatus("processing");
+        setIngestJob(job);
+        lastJob = job;
 
-      if (!finalJob.result) {
-        throw new Error("Job completed but no result payload was returned.");
+        const finalJob = await waitForIngestJob(
+          job.batchId,
+          abortController.signal,
+          setIngestJob,
+        );
+
+        if (!finalJob.result) {
+          throw new Error("Job completed but no result payload was returned.");
+        }
+
+        mergedResult = mergedResult
+          ? mergeIngestResults(mergedResult, finalJob.result)
+          : finalJob.result;
+        bytesFromCompletedBatches += batchFiles.reduce(
+          (sum, file) => sum + file.size,
+          0,
+        );
+        fileIndexOffset += batchFiles.length;
       }
-      setResult(finalJob.result);
+
+      if (!mergedResult || !lastJob) {
+        throw new Error("Upload did not produce any ingest results.");
+      }
+
+      setResult(mergedResult);
       setStatus("success");
-      setIngestJob(finalJob);
-      const warnings = finalJob.result.transcriptionErrors.length;
+      setIngestJob(lastJob);
+      const warnings = mergedResult.transcriptionErrors.length;
       toast.success(
-        `Processed ${finalJob.result.packages.length} file${
-          finalJob.result.packages.length === 1 ? "" : "s"
+        `Processed ${mergedResult.packages.length} file${
+          mergedResult.packages.length === 1 ? "" : "s"
         }`,
         {
           description:
             warnings > 0
               ? `${warnings} warning${warnings === 1 ? "" : "s"} — opening review.`
-              : "Transcription complete — opening review.",
+              : uploadBatches.length > 1
+                ? `Uploaded in ${uploadBatches.length} batches — opening review.`
+                : "Transcription complete — opening review.",
         },
       );
-      const completedResult = finalJob.result;
+      const completedResult = mergedResult;
       cancelAutoRedirect();
       redirectTimerRef.current = setTimeout(() => {
         redirectTimerRef.current = null;
@@ -514,7 +554,9 @@ function UploadProgressBar({
         <p className="font-medium text-foreground">
           {finalizing
             ? `Uploaded ${progress.totalFiles} file${progress.totalFiles === 1 ? "" : "s"}`
-            : `Uploading file ${progress.fileIndex} of ${progress.totalFiles}`}
+            : progress.totalUploadBatches > 1
+              ? `Upload batch ${progress.uploadBatchIndex} of ${progress.totalUploadBatches} · file ${progress.fileIndex} of ${progress.totalFiles}`
+              : `Uploading file ${progress.fileIndex} of ${progress.totalFiles}`}
         </p>
         <p className="text-[12px] text-muted-foreground tabular-nums">
           {displayedBatchPercentage}%
@@ -540,6 +582,15 @@ function UploadProgressBar({
 // on transient failures). Surfacing this avoids the perception of a hang.
 const RETRY_DETECT_DROP_THRESHOLD = 5;
 
+interface UploadScope {
+  totalFiles: number;
+  fileIndexOffset: number;
+  totalBytes: number;
+  bytesBeforeBatch: number;
+  uploadBatchIndex: number;
+  totalUploadBatches: number;
+}
+
 async function uploadFilesToBlob(
   files: File[],
   folderId: string | undefined,
@@ -547,6 +598,7 @@ async function uploadFilesToBlob(
   signal: AbortSignal,
   onProgress: (progress: UploadProgress) => void,
   onAllUploaded: () => void,
+  scope?: UploadScope,
 ): Promise<IngestJobSnapshot> {
   const blobs: Array<{
     url: string;
@@ -555,7 +607,7 @@ async function uploadFilesToBlob(
     contentType: string;
   }> = [];
 
-  const totalBytes = files.reduce((sum, f) => sum + f.size, 0) || 1;
+  const batchBytes = files.reduce((sum, f) => sum + f.size, 0) || 1;
   let bytesFromCompletedFiles = 0;
 
   for (const [index, file] of files.entries()) {
@@ -574,14 +626,19 @@ async function uploadFilesToBlob(
       maxPercentage = Math.max(maxPercentage, clamped);
       const batchBytesSoFar =
         bytesFromCompletedFiles + (file.size * maxPercentage) / 100;
+      const overallBytesSoFar =
+        (scope?.bytesBeforeBatch ?? 0) + batchBytesSoFar;
+      const overallTotalBytes = scope?.totalBytes ?? batchBytes;
       const batchPercentage = Math.min(
         100,
-        Math.round((batchBytesSoFar / totalBytes) * 100),
+        Math.round((overallBytesSoFar / overallTotalBytes) * 100),
       );
       onProgress({
         fileName: file.name,
-        fileIndex: index + 1,
-        totalFiles: files.length,
+        fileIndex: (scope?.fileIndexOffset ?? 0) + index + 1,
+        totalFiles: scope?.totalFiles ?? files.length,
+        uploadBatchIndex: scope?.uploadBatchIndex ?? 1,
+        totalUploadBatches: scope?.totalUploadBatches ?? 1,
         percentage: Math.round(maxPercentage),
         batchPercentage,
         retrying,
@@ -803,6 +860,21 @@ async function safeReadJson(response: Response): Promise<unknown> {
   }
 }
 
+function mergeIngestResults(
+  left: ManualIngestResult,
+  right: ManualIngestResult,
+): ManualIngestResult {
+  return {
+    packages: [...left.packages, ...right.packages],
+    transcriptions: [...left.transcriptions, ...right.transcriptions],
+    metadata: [...left.metadata, ...right.metadata],
+    transcriptionErrors: [
+      ...left.transcriptionErrors,
+      ...right.transcriptionErrors,
+    ],
+  };
+}
+
 function validateFiles(files: File[], blobReady: boolean): string | null {
   const acceptedExtensions = new Set<string>(ACCEPTED_UPLOAD_EXTENSIONS);
   const totalBytes = files.reduce((sum, file) => sum + file.size, 0);
@@ -826,6 +898,18 @@ function validateFiles(files: File[], blobReady: boolean): string | null {
   if (!blobReady && totalBytes > DIRECT_INGEST_MAX_BYTES) {
     return `Vercel Blob is not configured, so direct uploads are limited to ${humanFileSize(DIRECT_INGEST_MAX_BYTES)} per batch.`;
   }
+
+  if (blobReady) {
+    try {
+      partitionFilesIntoUploadBatches(files);
+    } catch (error) {
+      if (error instanceof Error) {
+        return error.message;
+      }
+      return "Upload could not be split into valid batches.";
+    }
+  }
+
   return null;
 }
 

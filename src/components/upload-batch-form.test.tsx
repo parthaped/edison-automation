@@ -49,7 +49,7 @@ describe("UploadBatchForm", () => {
 
     expect(upload).not.toHaveBeenCalled();
     expect(
-      screen.getByText(/The per-file limit is 250.0 MB/),
+      screen.getByText(/The per-file limit is 500.0 MB/),
     ).toBeInTheDocument();
   });
 

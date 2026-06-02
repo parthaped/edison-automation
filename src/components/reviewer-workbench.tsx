@@ -81,14 +81,14 @@ export function ReviewerWorkbench({
   const [activeIndex, setActiveIndex] = useState(initialIndex);
   const [approvedIds, setApprovedIds] = useState<Set<string>>(new Set());
   const [approving, setApproving] = useState(false);
-  const [deleteConfirming, setDeleteConfirming] = useState(false);
+  const [deleteConfirmingForId, setDeleteConfirmingForId] = useState<
+    string | null
+  >(null);
   const [deleting, setDeleting] = useState(false);
 
-  useEffect(() => {
-    setDeleteConfirming(false);
-  }, [activeIndex]);
-
   const activeDocument = documents[activeIndex] ?? documents[0];
+  const deleteConfirming =
+    deleteConfirmingForId === activeDocument?.documentId;
 
   if (!activeDocument) {
     return (
@@ -162,7 +162,7 @@ export function ReviewerWorkbench({
   async function handleDelete() {
     if (deleting) return;
     if (!deleteConfirming) {
-      setDeleteConfirming(true);
+      setDeleteConfirmingForId(activeDocument.documentId);
       return;
     }
 
@@ -185,7 +185,7 @@ export function ReviewerWorkbench({
       const remaining = documents.filter(
         (document) => document.documentId !== activeDocument.documentId,
       );
-      setDeleteConfirming(false);
+      setDeleteConfirmingForId(null);
       if (remaining.length === 0) {
         router.push("/review");
       } else {
@@ -237,7 +237,7 @@ export function ReviewerWorkbench({
                 type="button"
                 variant="outline"
                 size="sm"
-                onClick={() => setDeleteConfirming(false)}
+                onClick={() => setDeleteConfirmingForId(null)}
                 disabled={deleting}
               >
                 Cancel

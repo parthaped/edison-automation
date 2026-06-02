@@ -22,7 +22,15 @@ export const TRANSCRIBABLE_EXTENSIONS = [
 export const ACCEPTED_UPLOAD_MIME_TYPES = TRANSCRIBABLE_MIME_TYPES;
 export const ACCEPTED_UPLOAD_EXTENSIONS = TRANSCRIBABLE_EXTENSIONS;
 
-export const MAX_UPLOAD_BYTES = 250 * 1024 * 1024;
+// Per-file upload cap. A single PDF or image is always uploaded and ingested
+// as one atomic unit — we never split a source file across batches or at
+// arbitrary byte boundaries. Vercel Blob "multipart" is transport-only; the
+// stored blob is identical to the original file. Sub-document boundaries
+// inside a PDF are detected during transcription on the complete file.
+export const MAX_UPLOAD_BYTES = 500 * 1024 * 1024;
+// Maximum total size per ingest batch when uploading many files at once.
+// Files are grouped into whole-file batches; one file is never divided.
+export const MAX_UPLOAD_BATCH_BYTES = MAX_UPLOAD_BYTES;
 export const DIRECT_INGEST_MAX_BYTES = 4 * 1024 * 1024;
 // Match @vercel/blob multipart part size; smaller files use a single PUT upload.
 export const BLOB_MULTIPART_THRESHOLD_BYTES = 8 * 1024 * 1024;
@@ -57,6 +65,61 @@ export function inferUploadContentType(
 
 export function shouldUseBlobMultipartUpload(fileSize: number): boolean {
   return fileSize >= BLOB_MULTIPART_THRESHOLD_BYTES;
+}
+
+export class UploadBatchPartitionError extends Error {
+  constructor(
+    message: string,
+    readonly fileName?: string,
+  ) {
+    super(message);
+    this.name = "UploadBatchPartitionError";
+  }
+}
+
+/** Groups files into upload batches without splitting any single file. */
+export function partitionFilesIntoUploadBatches<T extends { size: number }>(
+  files: T[],
+  maxBatchBytes: number = MAX_UPLOAD_BATCH_BYTES,
+): T[][] {
+  if (maxBatchBytes <= 0) {
+    throw new UploadBatchPartitionError("Upload batch size limit must be positive.");
+  }
+
+  const batches: T[][] = [];
+  let currentBatch: T[] = [];
+  let currentBatchBytes = 0;
+
+  for (const file of files) {
+    if (file.size > maxBatchBytes) {
+      const fileName =
+        "name" in file && typeof file.name === "string" ? file.name : undefined;
+      throw new UploadBatchPartitionError(
+        fileName
+          ? `${fileName} exceeds the per-file upload limit.`
+          : "A selected file exceeds the per-file upload limit.",
+        fileName,
+      );
+    }
+
+    if (
+      currentBatch.length > 0 &&
+      currentBatchBytes + file.size > maxBatchBytes
+    ) {
+      batches.push(currentBatch);
+      currentBatch = [];
+      currentBatchBytes = 0;
+    }
+
+    currentBatch.push(file);
+    currentBatchBytes += file.size;
+  }
+
+  if (currentBatch.length > 0) {
+    batches.push(currentBatch);
+  }
+
+  return batches;
 }
 
 export const ACCEPT_ATTR = [
