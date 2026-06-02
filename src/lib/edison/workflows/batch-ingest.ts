@@ -446,6 +446,7 @@ async function transcribePreparedFile(
       }
 
       const chunkResults: TranscribePageChunkResult[] = [];
+      const failedRanges: string[] = [];
       for (
         let offset = 0;
         offset < ranges.length;
@@ -484,8 +485,15 @@ async function transcribePreparedFile(
               stage: "transcription",
               message: `Pages ${range.startPage}-${range.endPage} failed: ${message}`,
             });
+            failedRanges.push(`${range.startPage}-${range.endPage}`);
           }
         }
+      }
+
+      if (failedRanges.length > 0) {
+        throw new RetryableError(
+          `Page chunk transcription incomplete for ${blob.name}; failed page ranges: ${failedRanges.join(", ")}.`,
+        );
       }
 
       if (chunkResults.length === 0) {
@@ -495,6 +503,13 @@ async function transcribePreparedFile(
           transcribeMs: Date.now() - transcribeStarted,
           transcribeChunkCount: ranges.length,
         };
+      }
+
+      const missingPages = findMissingTranscribedPages(chunkResults, pageCount);
+      if (missingPages.length > 0) {
+        throw new RetryableError(
+          `Page chunk transcription incomplete for ${blob.name}; missing pages: ${missingPages.join(", ")}.`,
+        );
       }
 
       const orderedPages = chunkResults
@@ -513,6 +528,7 @@ async function transcribePreparedFile(
         emptyTranscribedMetadata(),
         subDocumentPlans,
       );
+      assertEverySubDocumentHasTranscription(blob.name, merged.subDocuments);
 
       const transcribeMs = Date.now() - transcribeStarted;
       console.info("[batch-ingest] transcribe:chunked", {
@@ -536,6 +552,7 @@ async function transcribePreparedFile(
       blob,
       promptTask,
     });
+    assertEverySubDocumentHasTranscription(blob.name, result.subDocuments);
 
     return {
       ...result,
@@ -544,6 +561,9 @@ async function transcribePreparedFile(
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     errors.push({ fileName: blob.name, stage: "transcription", message });
+    if (error instanceof RetryableError) {
+      throw error;
+    }
     if (isTransientError(error)) {
       throw new RetryableError(
         `Transcription failed for ${blob.name}: ${message}`,
@@ -850,6 +870,35 @@ function buildResult(results: FileResult[]): ManualIngestResult {
     metadata: results.flatMap((entry) => entry.metadata),
     transcriptionErrors: results.flatMap((entry) => entry.errors),
   };
+}
+
+function findMissingTranscribedPages(
+  chunkResults: TranscribePageChunkResult[],
+  totalPages: number,
+): number[] {
+  const seen = new Set<number>();
+  for (const chunk of chunkResults) {
+    for (const page of chunk.pages) {
+      seen.add(page.pageNumber);
+    }
+  }
+  return Array.from({ length: totalPages }, (_, index) => index + 1).filter(
+    (pageNumber) => !seen.has(pageNumber),
+  );
+}
+
+function assertEverySubDocumentHasTranscription(
+  fileName: string,
+  subDocuments: TranscribedSubDocument[],
+): void {
+  const emptyRanges = subDocuments
+    .filter((subDocument) => subDocument.ocrText.trim().length === 0)
+    .map((subDocument) => `${subDocument.startPage}-${subDocument.endPage}`);
+  if (emptyRanges.length > 0) {
+    throw new RetryableError(
+      `Transcription incomplete for ${fileName}; empty sub-document ranges: ${emptyRanges.join(", ")}.`,
+    );
+  }
 }
 
 function emptyTranscribedMetadata(): TranscribedSubDocument["metadata"] {
