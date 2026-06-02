@@ -195,6 +195,30 @@ describe("EdisonAutomationService", () => {
     });
   });
 
+  it("deletes a document and removes it from review", async () => {
+    const repository = new InMemoryEdisonRepository(true);
+    const service = new EdisonAutomationService(repository);
+
+    await service.deleteDocument("D9032-00001");
+
+    expect(await repository.getDocumentRecord("D9032-00001")).toBeNull();
+    const { reviewCase } = await service.getReviewWorkbench();
+    expect(
+      reviewCase?.documents.some(
+        (document) => document.documentId === "D9032-00001",
+      ),
+    ).toBe(false);
+  });
+
+  it("throws NOT_FOUND when deleting an unknown document", async () => {
+    const service = new EdisonAutomationService(new InMemoryEdisonRepository(true));
+
+    await expect(service.deleteDocument("does-not-exist")).rejects.toMatchObject({
+      code: "NOT_FOUND",
+      status: 404,
+    });
+  });
+
   it("updates group splits by rebuilding sibling documents", async () => {
     const repository = new InMemoryEdisonRepository(false);
     const file = await makeMultiPageUploadFile(

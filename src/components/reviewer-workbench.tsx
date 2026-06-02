@@ -81,6 +81,12 @@ export function ReviewerWorkbench({
   const [activeIndex, setActiveIndex] = useState(initialIndex);
   const [approvedIds, setApprovedIds] = useState<Set<string>>(new Set());
   const [approving, setApproving] = useState(false);
+  const [deleteConfirming, setDeleteConfirming] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  useEffect(() => {
+    setDeleteConfirming(false);
+  }, [activeIndex]);
 
   const activeDocument = documents[activeIndex] ?? documents[0];
 
@@ -153,6 +159,51 @@ export function ReviewerWorkbench({
     }
   }
 
+  async function handleDelete() {
+    if (deleting) return;
+    if (!deleteConfirming) {
+      setDeleteConfirming(true);
+      return;
+    }
+
+    setDeleting(true);
+    try {
+      const response = await fetch(
+        `/api/documents/${encodeURIComponent(activeDocument.documentId)}`,
+        { method: "DELETE" },
+      );
+      if (!response.ok) {
+        const data = (await response.json().catch(() => null)) as
+          | { error?: { message?: string } }
+          | null;
+        throw new Error(
+          data?.error?.message ?? `Delete failed (${response.status}).`,
+        );
+      }
+
+      toast.success("Document removed from review.");
+      const remaining = documents.filter(
+        (document) => document.documentId !== activeDocument.documentId,
+      );
+      setDeleteConfirming(false);
+      if (remaining.length === 0) {
+        router.push("/review");
+      } else {
+        const nextIndex = Math.min(activeIndex, remaining.length - 1);
+        router.push(
+          `/review?doc=${encodeURIComponent(remaining[nextIndex].documentId)}`,
+        );
+      }
+      router.refresh();
+    } catch (error) {
+      toast.error("Could not delete document", {
+        description: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   return (
     <section
       aria-labelledby="review-workbench-title"
@@ -176,7 +227,48 @@ export function ReviewerWorkbench({
             />
           ) : null}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {deleteConfirming ? (
+            <div className="flex flex-wrap items-center gap-2 rounded-md border border-rose-300 bg-rose-50 px-2 py-1">
+              <span className="text-[12px] font-medium text-rose-900">
+                Remove this file from review?
+              </span>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setDeleteConfirming(false)}
+                disabled={deleting}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                variant="destructive"
+                size="sm"
+                onClick={handleDelete}
+                disabled={deleting}
+              >
+                {deleting ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                ) : (
+                  <Trash2 className="h-3.5 w-3.5" strokeWidth={1.8} aria-hidden="true" />
+                )}
+                {deleting ? "Removing…" : "Confirm remove"}
+              </Button>
+            </div>
+          ) : (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={handleDelete}
+              disabled={deleting || approving}
+            >
+              <Trash2 className="h-3.5 w-3.5" strokeWidth={1.8} aria-hidden="true" />
+              Remove
+            </Button>
+          )}
           <Button
             variant="outline"
             size="sm"

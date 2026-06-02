@@ -161,6 +161,14 @@ export class InMemoryEdisonRepository implements EdisonRepository {
     return updated;
   }
 
+  async deleteDocument(documentId: string): Promise<boolean> {
+    if (!this.documents.has(documentId)) return false;
+    this.documents.delete(documentId);
+    this.transcriptions.delete(documentId);
+    this.metadata.delete(documentId);
+    return true;
+  }
+
   async getReviewCase(documentId?: string): Promise<ReviewCase | null> {
     return buildReviewCase(await this.listDocumentRecords(), documentId);
   }

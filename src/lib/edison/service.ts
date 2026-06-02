@@ -803,6 +803,13 @@ export class EdisonAutomationService {
     return updated;
   }
 
+  async deleteDocument(documentId: string) {
+    const deleted = await this.repository.deleteDocument(documentId);
+    if (!deleted) {
+      throw new AppError("NOT_FOUND", "Document was not found.", 404);
+    }
+  }
+
   async buildBatchExportFromPayload(
     payload: BatchExportPayload,
   ): Promise<{ bytes: Uint8Array; fileName: string; documentCount: number }> {

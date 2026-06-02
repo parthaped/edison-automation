@@ -228,6 +228,19 @@ export class BlobEdisonRepository implements EdisonRepository {
     return document;
   }
 
+  async deleteDocument(documentId: string): Promise<boolean> {
+    const path = recordPath(documentId);
+    const { blobs } = await list({ prefix: path, limit: 1 });
+    const match = blobs.find((blob) => blob.pathname === path);
+    if (!match) return false;
+    try {
+      await del(match.url);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   async getReviewCase(documentId?: string): Promise<ReviewCase | null> {
     return buildReviewCase(await this.listDocumentRecords(), documentId);
   }

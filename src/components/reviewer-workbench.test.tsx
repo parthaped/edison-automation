@@ -13,15 +13,17 @@ import {
 // environment doesn't mount an app-router context, so we stub the hook to a
 // no-op router. The mock is hoisted so it applies before the component is
 // imported.
+const routerMocks = {
+  refresh: vi.fn(),
+  push: vi.fn(),
+  replace: vi.fn(),
+  back: vi.fn(),
+  forward: vi.fn(),
+  prefetch: vi.fn(),
+};
+
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({
-    refresh: vi.fn(),
-    push: vi.fn(),
-    replace: vi.fn(),
-    back: vi.fn(),
-    forward: vi.fn(),
-    prefetch: vi.fn(),
-  }),
+  useRouter: () => routerMocks,
 }));
 
 const transcriptionsById = {
@@ -88,5 +90,41 @@ describe("ReviewerWorkbench", () => {
 
     const link = screen.getByRole("link", { name: /open standalone/i });
     expect(link).toHaveAttribute("href", "/viewer/D9032-00001");
+  });
+
+  it("shows a remove control for mistakenly uploaded files", async () => {
+    const user = userEvent.setup();
+    routerMocks.push.mockClear();
+    routerMocks.refresh.mockClear();
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ ok: true }),
+      }),
+    );
+
+    render(
+      <ReviewerWorkbench
+        documents={[sampleDocuments[0]]}
+        transcriptions={transcriptionsById}
+        metadata={metadataById}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /^remove$/i }));
+    expect(
+      screen.getByText("Remove this file from review?"),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /confirm remove/i }));
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/documents/D9032-00001",
+      expect.objectContaining({ method: "DELETE" }),
+    );
+    expect(routerMocks.push).toHaveBeenCalledWith("/review");
+    expect(routerMocks.refresh).toHaveBeenCalled();
   });
 });

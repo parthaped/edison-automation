@@ -16,6 +16,21 @@ const patchBodySchema = z
     { message: "Provide diplomaticText to edit or status to approve." },
   );
 
+export async function DELETE(
+  _request: Request,
+  context: { params: Promise<{ documentId: string }> },
+) {
+  try {
+    const { documentId } = await context.params;
+    const service = getEdisonService();
+    await service.deleteDocument(documentId);
+    return NextResponse.json({ ok: true });
+  } catch (error) {
+    const response = toErrorResponse(error);
+    return NextResponse.json(response.body, { status: response.status });
+  }
+}
+
 export async function PATCH(
   request: Request,
   context: { params: Promise<{ documentId: string }> },

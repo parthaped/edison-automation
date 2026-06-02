@@ -79,6 +79,16 @@ describe("buildReviewCase", () => {
   });
 });
 
+describe("InMemoryEdisonRepository.deleteDocument", () => {
+  it("removes the document and its sidecars", async () => {
+    const repository = new InMemoryEdisonRepository(true);
+
+    expect(await repository.deleteDocument("D9032-00001")).toBe(true);
+    expect(await repository.getDocumentRecord("D9032-00001")).toBeNull();
+    expect(await repository.deleteDocument("D9032-00001")).toBe(false);
+  });
+});
+
 describe("buildReviewCase with persisted queue promotion", () => {
   it("includes needs_review documents alongside existing reviewable records", async () => {
     const repository = new InMemoryEdisonRepository(false);

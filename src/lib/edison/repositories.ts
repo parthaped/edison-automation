@@ -57,6 +57,9 @@ export interface EdisonRepository {
   // Marks a document approved so it is included in the transcriptions CSV
   // export. Returns the updated package, or null when the document is unknown.
   approveDocument(documentId: string): Promise<DocumentPackage | null>;
+  // Permanently removes a document and its sidecars from review and export.
+  // Returns false when the document id is unknown.
+  deleteDocument(documentId: string): Promise<boolean>;
   getReviewCase(documentId?: string): Promise<ReviewCase | null>;
   listApprovedExportRows(): Promise<
     Array<{
