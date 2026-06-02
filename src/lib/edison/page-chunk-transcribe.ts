@@ -36,6 +36,8 @@ const metadataOnlySchema = z.object({
   recipients: z.array(z.string()),
   mentionedNames: z.array(z.string()),
   subjects: z.array(z.string()),
+  places: z.array(z.string()),
+  comments: z.string(),
 });
 
 export interface PageImageRef {
@@ -143,7 +145,7 @@ export async function extractDocumentMetadataFromSample(input: {
         content: [
           {
             type: "text",
-            text: `Index this ${input.totalPages}-page document for the Dublin Core catalog using the sample page and transcription excerpt. Base every field strictly on the document; use "Unknown" or empty arrays rather than guessing.\n\nTranscription excerpt:\n${excerpt}`,
+            text: `Index this ${input.totalPages}-page document for the TAEP Omeka-S catalog using the sample page and transcription excerpt. Extract document type, date, authors, recipients, names mentioned, places, subjects, and comments. Leave fields empty rather than guessing.\n\nTranscription excerpt:\n${excerpt}`,
           },
           {
             type: "image",
@@ -158,12 +160,14 @@ export async function extractDocumentMetadataFromSample(input: {
   const output = result.output;
   return {
     title: output.title?.trim() || "",
-    documentType: output.documentType || "Unknown",
-    date: output.date || "Unknown",
+    documentType: output.documentType?.trim() || "",
+    date: output.date?.trim() || "",
     authors: output.authors ?? [],
     recipients: output.recipients ?? [],
     mentionedNames: output.mentionedNames ?? [],
     subjects: output.subjects ?? [],
+    places: output.places ?? [],
+    comments: output.comments?.trim() || undefined,
   };
 }
 

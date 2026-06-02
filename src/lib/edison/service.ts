@@ -8,11 +8,16 @@ import {
   type ExtractionPlan,
 } from "./extraction";
 import { buildExportCsv, buildExportCsvRow } from "./export-csv";
+import { buildTaepIndexCsv, buildTaepIndexRow } from "./export-taep-index";
 import {
   appendSubDocumentSuffix,
   assignDocumentId,
   normalizeFolderId,
 } from "./id-policy";
+import {
+  buildMetadataExtraction,
+  normalizeMetadata,
+} from "./metadata-normalize";
 import { getActivePrompt } from "./prompts";
 import type { TranscribedMetadata } from "./transcribe";
 import type {
@@ -117,13 +122,13 @@ export function mergeTranscribedMetadata(
   transcribed?: TranscribedMetadata,
 ): MetadataExtraction {
   if (!transcribed) {
-    return processed;
+    return normalizeMetadata(processed);
   }
-  return {
+  return normalizeMetadata({
     ...processed,
     title: transcribed.title?.trim() || processed.title,
-    documentType: transcribed.documentType || "Unknown",
-    date: transcribed.date || "Unknown",
+    documentType: transcribed.documentType || processed.documentType,
+    date: transcribed.date || processed.date,
     authors: transcribed.authors,
     recipients: transcribed.recipients,
     mentionedNames: transcribed.mentionedNames,
@@ -131,7 +136,9 @@ export function mergeTranscribedMetadata(
       transcribed.subjects.length > 0
         ? transcribed.subjects
         : processed.subjects,
-  };
+    places: transcribed.places ?? processed.places,
+    comments: transcribed.comments ?? processed.comments,
+  });
 }
 
 export async function processSourceFile(
@@ -215,19 +222,13 @@ export async function processSourceFile(
     uncertainReadings,
   };
 
-  const metadata: MetadataExtraction = {
+  const metadata = buildMetadataExtraction({
     folderId: documentPackage.folderId,
     documentId: documentPackage.documentId,
-    title: documentPackage.title,
-    documentType: "Unknown",
-    date: "Unknown",
-    authors: [],
-    recipients: [],
-    mentionedNames: [],
-    subjects: [],
+    fallbackTitle: documentPackage.title,
     imageNames: documentPackage.pages.map((page) => page.imageFilename),
     confidence: confidenceResult.bucket,
-  };
+  });
 
   return {
     documentPackage,
@@ -508,19 +509,14 @@ export async function processSourceFileSubDocuments(
         : {}),
     };
 
-    const metadata: MetadataExtraction = {
+    const metadata = buildMetadataExtraction({
       folderId,
       documentId,
-      title: sub.metadata.title?.trim() || documentPackage.title,
-      documentType: sub.metadata.documentType || "Unknown",
-      date: sub.metadata.date || "Unknown",
-      authors: sub.metadata.authors,
-      recipients: sub.metadata.recipients,
-      mentionedNames: sub.metadata.mentionedNames,
-      subjects: sub.metadata.subjects,
+      transcribed: sub.metadata,
+      fallbackTitle: sub.metadata.title?.trim() || documentPackage.title,
       imageNames: pages.map((page) => page.imageFilename),
       confidence: confidenceResult.bucket,
-    };
+    });
 
     return {
       documentPackage: resolvePersistedDocumentStatus(documentPackage),
@@ -574,12 +570,13 @@ export function normalizeSubDocuments(
         uncertainReadings: [],
         metadata: {
           title: "",
-          documentType: "Unknown",
-          date: "Unknown",
+          documentType: "",
+          date: "",
           authors: [],
           recipients: [],
           mentionedNames: [],
           subjects: [],
+          places: [],
         },
       },
     ];
@@ -807,6 +804,23 @@ export class EdisonAutomationService {
     return updated;
   }
 
+  async saveMetadataComments(documentId: string, comments: string) {
+    const record = await this.repository.getDocumentRecord(documentId);
+    if (!record) {
+      throw new AppError("NOT_FOUND", "Document was not found.", 404);
+    }
+    const metadata = normalizeMetadata({
+      ...record.metadata,
+      comments: comments.trim() || undefined,
+    });
+    await this.repository.saveProcessedDocument(
+      record.document,
+      record.transcription,
+      metadata,
+    );
+    return metadata;
+  }
+
   async approveDocument(documentId: string) {
     const record = await this.repository.getDocumentRecord(documentId);
     if (!record) {
@@ -890,7 +904,13 @@ async function buildBatchZip(rows: BatchExportRow[]): Promise<{
   const exportedAt = new Date().toISOString();
 
   zip.file(
-    "index.csv",
+    "taep-index.csv",
+    buildTaepIndexCsv(
+      rows.map((row) => buildTaepIndexRow(row.metadata, exportedAt)),
+    ),
+  );
+  zip.file(
+    "omeka-import.csv",
     buildExportCsv(
       rows.map((row) => buildExportCsvRow(row.metadata, row.transcription)),
     ),
@@ -924,7 +944,8 @@ async function buildBatchZip(rows: BatchExportRow[]): Promise<{
       `Documents: ${rows.length}`,
       "",
       "Files:",
-      "- index.csv             CSV index of transcriptions and metadata",
+      "- taep-index.csv        TAEP Omeka-S form index (operator spreadsheet)",
+      "- omeka-import.csv      Omeka S CSV Import for edisondigital.rutgers.edu",
       "- manifest.json         Full structured metadata + transcription JSON",
       "- <documentId>/         Per-document folder",
       "    transcription.txt   Diplomatic transcription as plain text",

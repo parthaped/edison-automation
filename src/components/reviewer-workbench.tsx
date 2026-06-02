@@ -22,6 +22,7 @@ import {
   fileIndexForDocument,
   leadDocumentIdForFileIndex,
 } from "@/lib/edison/review-navigation";
+import { formatGloc } from "@/lib/edison/metadata-normalize";
 import type {
   ConfidenceBucket,
   DocumentPackage,
@@ -61,12 +62,13 @@ function emptyMetadata(document: DocumentPackage): MetadataExtraction {
     folderId: document.folderId,
     documentId: document.documentId,
     title: document.title,
-    documentType: "Unknown",
-    date: "Unknown",
+    documentType: "",
+    date: "",
     authors: [],
     recipients: [],
     mentionedNames: [],
     subjects: [],
+    places: [],
     imageNames: document.pages.map((page) => page.imageFilename),
     confidence: document.confidence,
   };
@@ -88,6 +90,8 @@ export function ReviewerWorkbench({
   const [deleteConfirmingForId, setDeleteConfirmingForId] = useState<
     string | null
   >(null);
+  const [commentDrafts, setCommentDrafts] = useState<Record<string, string>>({});
+  const [savingComments, setSavingComments] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
   const fileNavUnits = useMemo(
@@ -96,6 +100,7 @@ export function ReviewerWorkbench({
   );
 
   const activeDocument = documents[activeIndex] ?? documents[0];
+
   const deleteConfirming =
     deleteConfirmingForId === activeDocument?.documentId;
 
@@ -122,6 +127,10 @@ export function ReviewerWorkbench({
     emptyTranscription(activeDocument.documentId);
   const activeMetadata =
     metadata[activeDocument.documentId] ?? emptyMetadata(activeDocument);
+  const commentsDraft =
+    commentDrafts[activeDocument.documentId] ??
+    activeMetadata.comments ??
+    "";
 
   function goToFile(fileIndex: number) {
     const leadId = leadDocumentIdForFileIndex(fileNavUnits, fileIndex);
@@ -170,6 +179,42 @@ export function ReviewerWorkbench({
       });
     } finally {
       setApproving(false);
+    }
+  }
+
+  async function handleSaveComments() {
+    if (savingComments) return;
+    setSavingComments(true);
+    try {
+      const response = await fetch(
+        `/api/documents/${encodeURIComponent(activeDocument.documentId)}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ comments: commentsDraft }),
+        },
+      );
+      if (!response.ok) {
+        const data = (await response.json().catch(() => null)) as
+          | { error?: { message?: string } }
+          | null;
+        throw new Error(
+          data?.error?.message ?? `Save failed (${response.status}).`,
+        );
+      }
+      setCommentDrafts((prev) => {
+        const next = { ...prev };
+        delete next[activeDocument.documentId];
+        return next;
+      });
+      toast.success("Comments saved.");
+      router.refresh();
+    } catch (error) {
+      toast.error("Could not save comments", {
+        description: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      setSavingComments(false);
     }
   }
 
@@ -344,7 +389,18 @@ export function ReviewerWorkbench({
         <div className="border-b border-border md:border-b-0">
           <PanelHeading>Metadata checks</PanelHeading>
           <div className="px-5 py-4">
-            <MetadataRows metadata={activeMetadata} />
+            <MetadataRows
+              metadata={activeMetadata}
+              commentsDraft={commentsDraft}
+              onCommentsChange={(value) =>
+                setCommentDrafts((prev) => ({
+                  ...prev,
+                  [activeDocument.documentId]: value,
+                }))
+              }
+              onCommentsSave={handleSaveComments}
+              savingComments={savingComments}
+            />
           </div>
         </div>
 
@@ -494,39 +550,93 @@ function InfoCell({
   );
 }
 
-function MetadataRows({ metadata }: { metadata: MetadataExtraction }) {
+function MetadataRows({
+  metadata,
+  commentsDraft,
+  onCommentsChange,
+  onCommentsSave,
+  savingComments,
+}: {
+  metadata: MetadataExtraction;
+  commentsDraft: string;
+  onCommentsChange: (value: string) => void;
+  onCommentsSave: () => void;
+  savingComments: boolean;
+}) {
   const rows = useMemo(
     () => [
-      { label: "Title", value: metadata.title },
-      { label: "Date", value: metadata.date },
+      { label: "GLOC", value: formatGloc(metadata.folderId) },
+      { label: "Doc ID", value: metadata.documentId },
       { label: "Document type", value: metadata.documentType },
+      { label: "Date", value: metadata.date },
       { label: "Authors", value: metadata.authors.join("; ") },
       { label: "Recipients", value: metadata.recipients.join("; ") },
+      {
+        label: "Name(s) mentioned",
+        value: metadata.mentionedNames.join("; "),
+      },
       { label: "Subjects", value: metadata.subjects.join("; ") },
+      { label: "Places", value: metadata.places.join("; ") },
     ],
     [metadata],
   );
 
   return (
-    <table className="w-full border-collapse text-sm">
-      <tbody>
-        {rows.map((row) => (
-          <tr key={row.label} className="border-t border-border first:border-t-0">
-            <th
-              scope="row"
-              className="w-[35%] py-2 pr-3 text-left align-top text-[11px] font-medium uppercase tracking-wide text-muted-foreground"
-            >
-              {row.label}
-            </th>
-            <td className="py-2 text-right align-top font-medium text-foreground">
-              {row.value || (
-                <span className="text-muted-foreground/70">—</span>
-              )}
-            </td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
+    <div className="space-y-4">
+      <table className="w-full border-collapse text-sm">
+        <tbody>
+          {rows.map((row) => (
+            <tr key={row.label} className="border-t border-border first:border-t-0">
+              <th
+                scope="row"
+                className="w-[35%] py-2 pr-3 text-left align-top text-[11px] font-medium uppercase tracking-wide text-muted-foreground"
+              >
+                {row.label}
+              </th>
+              <td className="py-2 text-right align-top font-medium text-foreground">
+                {row.value || (
+                  <span className="text-muted-foreground/70">—</span>
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div className="border-t border-border pt-3">
+        <label
+          htmlFor="metadata-comments"
+          className="mb-1.5 block text-[11px] font-medium uppercase tracking-wide text-muted-foreground"
+        >
+          Comments
+        </label>
+        <textarea
+          id="metadata-comments"
+          value={commentsDraft}
+          onChange={(event) => onCommentsChange(event.target.value)}
+          rows={3}
+          className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
+          placeholder="Indexer notes (marginalia, attachments, conjectures)"
+        />
+        <div className="mt-2 flex justify-end">
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            onClick={onCommentsSave}
+            disabled={savingComments}
+          >
+            {savingComments ? (
+              <>
+                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                Saving…
+              </>
+            ) : (
+              "Save comments"
+            )}
+          </Button>
+        </div>
+      </div>
+    </div>
   );
 }
 

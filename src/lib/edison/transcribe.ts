@@ -96,6 +96,8 @@ export interface TranscribedMetadata {
   recipients: string[];
   mentionedNames: string[];
   subjects: string[];
+  places: string[];
+  comments?: string;
 }
 
 // One detected document inside the uploaded source. A PDF that contains
@@ -158,17 +160,17 @@ const subDocumentSchema = z.object({
   title: z
     .string()
     .describe(
-      "A concise descriptive catalog title for THIS sub-document, naming the principal correspondents or topic (e.g. \"Marks, William D. to Edison, Thomas A.\" or \"Notebook entry on lamp filament tests\"). Do not include the Doc ID or Folder ID. Use \"Unknown\" only when the document is illegible.",
+      "A concise descriptive catalog title naming the principal correspondents or topic. Do not include the Doc ID or Folder ID. Leave empty when unclear.",
     ),
   documentType: z
     .string()
     .describe(
-      'Single document type, lowercase, from this controlled list when applicable: "correspondence", "telegram", "notebook page", "ledger", "memorandum", "legal document", "financial statement", "drawing", "printed material". Use "Unknown" only if it cannot be determined.',
+      'Document type from the TAEP list when applicable: "Letter", "Memorandum", "Telegram", "Report", "Publication", "Payroll Record", "Minutes", "Miscellaneous", "Questionnaire", "List", "Technical Note", "Notebook page", "Ledger", "Legal document", "Financial statement", "Drawing", "Printed material". Leave empty if it cannot be determined.',
     ),
   date: z
     .string()
     .describe(
-      'Document date in ISO form: YYYY-MM-DD when the full date is known, YYYY-MM or YYYY when only partial, or "Unknown". Never invent a date that is not supported by the document.',
+      "Document date in ISO form: YYYY-MM-DD when the full date is known, YYYY-MM or YYYY when only partial. Leave empty when unknown. Never invent a date.",
     ),
   authors: z
     .array(z.string())
@@ -183,12 +185,22 @@ const subDocumentSchema = z.object({
   mentionedNames: z
     .array(z.string())
     .describe(
-      'People, organizations, or places named in the body of THIS sub-document that are not the author or recipient. People as "Last, First"; organizations and places as written. Empty array if none.',
+      'Other people and organizations named in the body that are not the author or recipient. People as "Last, First"; organizations as written. Do not include geographic places here. Empty array if none.',
+    ),
+  places: z
+    .array(z.string())
+    .describe(
+      "Geographic places named in the document (cities, states, countries, regions). Empty array if none.",
     ),
   subjects: z
     .array(z.string())
     .describe(
-      "1-6 concrete topical subject tags drawn from THIS sub-document's content (e.g. \"electric lighting\", \"patent litigation\", \"phonograph\"). Prefer specific Edison-domain topics over generic words. Empty array if none can be determined; never use placeholder text.",
+      'One topical subject tag for this document (e.g. "Advice", "Telegraph", "Family", "Patents"). Not people, organizations, or places. Empty array if none.',
+    ),
+  comments: z
+    .string()
+    .describe(
+      "Indexer notes: marginalia, attachments, conjectured authorship, cross-references. Leave empty if none.",
     ),
 });
 
@@ -205,7 +217,7 @@ const SPLIT_INSTRUCTION =
   "First, look at the source as a whole and decide whether it contains ONE document or MULTIPLE separate documents stitched together. Signals that mark a boundary between distinct documents include: a new letterhead, a new dateline, a new salutation/closing pair, an 'End of letter' marker, an explicit page-break separator, a blank or near-blank page, or an obvious change in handwriting/typography. If you see no such signals, treat the source as a single document and return exactly one entry covering every page. If you do see boundaries, return one sub-document entry per detected document, in source-page order, with contiguous and non-overlapping page ranges that cover every page of the source.";
 
 const METADATA_INSTRUCTION =
-  "For EACH sub-document, index it for the Dublin Core catalog: a descriptive title, the document type, the date (ISO Year-Month-Day when known), the author(s) and recipient(s) in last-name-first form, other names mentioned, and a few concrete topical subject tags. Base every field strictly on the document; leave a field empty or \"Unknown\" rather than guessing. Return everything in the structured fields provided.";
+  "For EACH sub-document, index it for the TAEP Omeka-S catalog: document type, date (ISO when known), author(s) and recipient(s) in last-name-first form, other names mentioned, geographic places, one topical subject, and indexer comments for marginalia or attachments. Separate multiple values within a field with semicolons in your reasoning, but return arrays in the structured fields. Base every field strictly on the document; leave a field empty rather than guessing.";
 
 export async function transcribeDocument(
   input: TranscribeDocumentInput,
@@ -277,12 +289,14 @@ export async function transcribeDocument(
           uncertainReadings: ocrText.match(/\[[^\]]+\?\]/g) ?? [],
           metadata: {
             title: entry.title?.trim() || "",
-            documentType: entry.documentType || "Unknown",
-            date: entry.date || "Unknown",
+            documentType: entry.documentType?.trim() || "",
+            date: entry.date?.trim() || "",
             authors: entry.authors ?? [],
             recipients: entry.recipients ?? [],
             mentionedNames: entry.mentionedNames ?? [],
             subjects: entry.subjects ?? [],
+            places: entry.places ?? [],
+            comments: entry.comments?.trim() || undefined,
           },
         };
       });

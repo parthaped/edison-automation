@@ -111,6 +111,8 @@ export interface MetadataExtraction {
   recipients: string[];
   mentionedNames: string[];
   subjects: string[];
+  places: string[];
+  comments?: string;
   imageNames: string[];
   confidence: ConfidenceBucket;
 }

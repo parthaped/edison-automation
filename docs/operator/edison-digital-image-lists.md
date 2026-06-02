@@ -47,6 +47,23 @@ ready to drive a batched upload.
 
 The transcriptions follow the canonical formatting (`Letterhead, dateline,
 salutation, body, closing, signature`, with handwritten marginal notes in
-italicized angle brackets), and the metadata grid mirrors the indexing prompt
-(document type, date, authors, recipients, mentioned names, subjects, image
-names, Folder ID, Doc ID).
+italicized angle brackets), and the metadata grid mirrors the TAEP indexing
+form (GLOC, Doc ID, document type, date, authors, recipients, names mentioned,
+subjects, places, comments, image filenames).
+
+## 4. Batch export CSVs
+
+Approved batch exports include two CSV files:
+
+- **`taep-index.csv`** — operator spreadsheet aligned with the TAEP Omeka-S New
+  Item Form columns (`GLOC`, `DocID`, `Document Type`, `Date`, `Author(s)`,
+  `Recipient(s)`, `Name(s) Mentioned`, `Subjects`, `Places`, `Image Filename(s)`,
+  `Comments`). Multivalue fields use semicolon separators.
+- **`omeka-import.csv`** — Omeka S CSV Import module shape for
+  edisondigital.rutgers.edu (`dcterms:identifier`, `dcterms:title`,
+  `bibo:recipient`, `dcterms:relation`, `dcterms:coverage`, `dcterms:isPartOf`,
+  `scripto:transcription`, `o:media/file`, …). Multivalue fields use `|`
+  separators.
+
+Blank fields stay blank in both exports; the app does not default missing
+metadata to `"Unknown"`.

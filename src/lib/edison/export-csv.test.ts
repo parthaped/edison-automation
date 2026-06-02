@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { buildCatalogTitle } from "./metadata-normalize";
 import { buildExportCsv, buildExportCsvRow } from "./export-csv";
 import { sampleMetadata, sampleTranscription } from "./sample-data";
 import type { MetadataExtraction } from "./types";
@@ -9,13 +10,22 @@ describe("export csv", () => {
 
     expect(row["o:id"]).toBe("");
     expect(row["dcterms:identifier"]).toBe("D9032-00001");
-    expect(row["dcterms:title"]).toBe(sampleMetadata.title);
-    expect(row["dcterms:type"]).toBe("correspondence");
+    expect(row["dcterms:title"]).toBe(
+      buildCatalogTitle(sampleMetadata.documentId, sampleMetadata),
+    );
+    expect(row["dcterms:type"]).toBe("Letter");
     expect(row["dcterms:date"]).toBe("1890-01-12");
     expect(row["dcterms:creator"]).toBe("Marks, William D.");
+    expect(row["bibo:recipient"]).toBe("");
+    expect(row["dcterms:relation"]).toBe(
+      "Edison Electric Light Co. of Philadelphia",
+    );
     expect(row["dcterms:subject"]).toBe("Electric light|station materials");
-    expect(row["dcterms:description"]).toBe(sampleTranscription.diplomaticText);
-    expect(row["dcterms:source"]).toBe("D9032-F");
+    expect(row["dcterms:coverage"]).toBe("Philadelphia");
+    expect(row["dcterms:isPartOf"]).toBe(
+      "[D9032-F] Document File Series -- 1890",
+    );
+    expect(row["scripto:transcription"]).toBe(sampleTranscription.diplomaticText);
     expect(row["o:media/file"]).toBe(
       "D9032-00001/d9032-00001_0001.jpg|D9032-00001/d9032-00001_0002.jpg",
     );
@@ -50,7 +60,7 @@ describe("export csv", () => {
     const lines = csv.split("\n");
 
     expect(lines[0]).toBe(
-      "o:id,dcterms:identifier,dcterms:title,dcterms:type,dcterms:date,dcterms:creator,dcterms:subject,dcterms:description,dcterms:source,o:media/file",
+      "o:id,dcterms:identifier,dcterms:title,dcterms:type,dcterms:date,dcterms:creator,bibo:recipient,dcterms:relation,dcterms:subject,dcterms:coverage,dcterms:isPartOf,scripto:transcription,o:media/file",
     );
     expect(csv.endsWith("\n")).toBe(false);
     expect(lines.length).toBeGreaterThan(1);
@@ -66,12 +76,7 @@ describe("export csv", () => {
       buildExportCsvRow(partialMetadata, sampleTranscription),
     ).not.toThrow();
 
-    const csv = buildExportCsv([
-      buildExportCsvRow(partialMetadata, sampleTranscription),
-    ]);
-    const dataRow = csv.split("\n")[1];
-    const cells = dataRow.split(",");
-
-    expect(cells[2]).toBe("");
+    const row = buildExportCsvRow(partialMetadata, sampleTranscription);
+    expect(row["dcterms:title"]).toContain("[D9032-00001]");
   });
 });

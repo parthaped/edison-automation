@@ -171,10 +171,10 @@ describe("EdisonAutomationService", () => {
     const csv = await service.exportTranscriptionsCsv();
 
     expect(csv.split("\n")[0]).toBe(
-      "o:id,dcterms:identifier,dcterms:title,dcterms:type,dcterms:date,dcterms:creator,dcterms:subject,dcterms:description,dcterms:source,o:media/file",
+      "o:id,dcterms:identifier,dcterms:title,dcterms:type,dcterms:date,dcterms:creator,bibo:recipient,dcterms:relation,dcterms:subject,dcterms:coverage,dcterms:isPartOf,scripto:transcription,o:media/file",
     );
     expect(csv).toContain("D9032-00001");
-    expect(csv).toContain("D9032-F");
+    expect(csv).toContain("[D9032-F] Document File Series -- 1890");
   });
 
   it("refuses to approve a blocked document", async () => {
@@ -253,6 +253,7 @@ describe("EdisonAutomationService", () => {
             recipients: [],
             mentionedNames: [],
             subjects: [],
+            places: [],
           },
         },
         {
@@ -268,6 +269,7 @@ describe("EdisonAutomationService", () => {
             recipients: [],
             mentionedNames: [],
             subjects: [],
+            places: [],
           },
         },
       ],
@@ -328,12 +330,13 @@ describe("EdisonAutomationService", () => {
           uncertainReadings: [],
           metadata: {
             title: "",
-            documentType: "Unknown",
-            date: "Unknown",
+            documentType: "",
+            date: "",
             authors: [],
             recipients: [],
             mentionedNames: [],
             subjects: [],
+            places: [],
           },
         },
       ],
@@ -565,12 +568,13 @@ describe("validateContiguousSplits", () => {
 describe("normalizeSubDocuments", () => {
   const blankMetadata = {
     title: "",
-    documentType: "Unknown",
-    date: "Unknown",
+    documentType: "",
+    date: "",
     authors: [],
     recipients: [],
     mentionedNames: [],
     subjects: [],
+    places: [],
   };
 
   function makeSub(
@@ -661,6 +665,7 @@ describe("processSourceFileSubDocuments", () => {
             recipients: [],
             mentionedNames: [],
             subjects: [],
+            places: [],
           },
         },
       ],
@@ -721,6 +726,7 @@ describe("processSourceFileSubDocuments", () => {
             recipients: [],
             mentionedNames: [],
             subjects: [],
+            places: [],
           },
         },
         {
@@ -736,6 +742,7 @@ describe("processSourceFileSubDocuments", () => {
             recipients: [],
             mentionedNames: [],
             subjects: [],
+            places: [],
           },
         },
         {
@@ -751,6 +758,7 @@ describe("processSourceFileSubDocuments", () => {
             recipients: [],
             mentionedNames: [],
             subjects: [],
+            places: [],
           },
         },
       ],
@@ -825,12 +833,13 @@ describe("processSourceFileSubDocuments", () => {
           uncertainReadings: [],
           metadata: {
             title: "",
-            documentType: "Unknown",
-            date: "Unknown",
+            documentType: "",
+            date: "",
             authors: [],
             recipients: [],
             mentionedNames: [],
             subjects: [],
+            places: [],
           },
         },
       ],
@@ -856,12 +865,13 @@ describe("mergeTranscribedMetadata", () => {
     folderId: "D9032-F",
     documentId: "D9032-00001",
     title: "[D9032-00001]",
-    documentType: "Unknown",
-    date: "Unknown",
+    documentType: "",
+    date: "",
     authors: [],
     recipients: [],
     mentionedNames: [],
     subjects: [],
+    places: [],
     imageNames: ["page.jpg"],
     confidence: "medium",
   };
@@ -875,10 +885,11 @@ describe("mergeTranscribedMetadata", () => {
       recipients: [],
       mentionedNames: [],
       subjects: [],
+      places: [],
     });
 
     expect(merged.subjects).toEqual([]);
-    expect(merged.documentType).toBe("correspondence");
+    expect(merged.documentType).toBe("Letter");
     expect(merged.title).toBe("Marks to Edison");
   });
 
@@ -891,6 +902,7 @@ describe("mergeTranscribedMetadata", () => {
       recipients: [],
       mentionedNames: [],
       subjects: ["Electric light"],
+      places: [],
     });
 
     expect(merged.title).toBe("[D9032-00001]");

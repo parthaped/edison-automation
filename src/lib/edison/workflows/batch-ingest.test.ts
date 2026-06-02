@@ -94,12 +94,13 @@ describe("mergeTranscribedMetadata (persist step)", () => {
         folderId: "D9032-F",
         documentId: "D9032-00001",
         title: "[D9032-00001]",
-        documentType: "Unknown",
-        date: "Unknown",
+        documentType: "",
+        date: "",
         authors: [],
         recipients: [],
         mentionedNames: [],
         subjects: [],
+        places: [],
         imageNames: [],
         confidence: "medium",
       },
@@ -111,11 +112,14 @@ describe("mergeTranscribedMetadata (persist step)", () => {
         recipients: [],
         mentionedNames: [],
         subjects: [],
+        places: [],
       },
     );
 
     expect(merged.subjects).toEqual([]);
     expect(merged.title).toBe("Marks to Edison");
+    expect(merged.documentType).toBe("Letter");
+    expect(merged.date).toBe("1890");
   });
 });
 

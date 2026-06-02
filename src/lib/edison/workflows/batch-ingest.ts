@@ -1,4 +1,4 @@
-import { put } from "@vercel/blob";
+import { put, del } from "@vercel/blob";
 import {
   FatalError,
   RetryableError,
@@ -21,6 +21,10 @@ import {
   type TranscribePageChunkResult,
 } from "../page-chunk-transcribe";
 import { rasterizePdfWithProvider } from "../rasterize-provider";
+import {
+  shouldDeleteSourceAfterRasterize,
+  shouldDeleteSourceAfterTranscribe,
+} from "../source-blob-lifecycle";
 import {
   processSourceFileSubDocuments,
   type TranscribedSubDocument,
@@ -158,6 +162,10 @@ async function processOneFile(input: ProcessOneFileInput): Promise<FileResult> {
   // Single fetch + rasterize (or image passthrough) before transcription.
   const prepared = await prepareAndRasterizeStep({ blob, documentId });
 
+  if (shouldDeleteSourceAfterRasterize({ blob, prepared })) {
+    await deleteSourceBlobStep({ blob, reason: "after-rasterize" });
+  }
+
   const transcribed = await transcribePreparedFile({
     blob,
     promptTask,
@@ -165,6 +173,10 @@ async function processOneFile(input: ProcessOneFileInput): Promise<FileResult> {
     pageImageUrls: prepared.urls,
     extractionPlan: prepared.extractionPlan,
   });
+
+  if (shouldDeleteSourceAfterTranscribe({ blob, prepared })) {
+    await deleteSourceBlobStep({ blob, reason: "after-transcribe" });
+  }
 
   const persisted = await persistSubDocumentsStep({
     folderId,
@@ -354,6 +366,28 @@ async function prepareAndRasterizeStep(
   }
 }
 
+async function deleteSourceBlobStep(input: {
+  blob: BlobRef;
+  reason: "after-rasterize" | "after-transcribe";
+}): Promise<void> {
+  "use step";
+
+  try {
+    await del(input.blob.url);
+    console.info("[batch-ingest] source-blob:deleted", {
+      fileName: input.blob.name,
+      reason: input.reason,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn("[batch-ingest] source-blob:delete-failed", {
+      fileName: input.blob.name,
+      reason: input.reason,
+      message,
+    });
+  }
+}
+
 interface TranscribePreparedFileInput {
   blob: BlobRef;
   promptTask: "diplomatic-transcription" | "project-notebook";
@@ -451,12 +485,13 @@ async function transcribePreparedFile(
             })
           : {
               title: "",
-              documentType: "Unknown",
-              date: "Unknown",
+              documentType: "",
+              date: "",
               authors: [],
               recipients: [],
               mentionedNames: [],
               subjects: [],
+              places: [],
             };
 
       const merged = mergePageChunkResults(
@@ -582,12 +617,13 @@ async function extractMetadataStep(input: {
     });
     return {
       title: "",
-      documentType: "Unknown",
-      date: "Unknown",
+      documentType: "",
+      date: "",
       authors: [] as string[],
       recipients: [] as string[],
       mentionedNames: [] as string[],
       subjects: [] as string[],
+      places: [] as string[],
     };
   }
 }

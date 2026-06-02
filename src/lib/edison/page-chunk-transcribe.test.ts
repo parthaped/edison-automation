@@ -28,6 +28,7 @@ describe("mergePageChunkResults", () => {
         recipients: [],
         mentionedNames: [],
         subjects: [],
+        places: [],
       },
     );
 

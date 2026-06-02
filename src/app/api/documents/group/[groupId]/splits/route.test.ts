@@ -58,6 +58,7 @@ async function buildSeededService(): Promise<EdisonAutomationService> {
           recipients: [],
           mentionedNames: [],
           subjects: [],
+          places: [],
         },
       },
       {
@@ -73,6 +74,7 @@ async function buildSeededService(): Promise<EdisonAutomationService> {
           recipients: [],
           mentionedNames: [],
           subjects: [],
+          places: [],
         },
       },
     ],
