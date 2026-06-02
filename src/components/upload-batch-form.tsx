@@ -11,7 +11,8 @@ import {
 import { useRouter } from "next/navigation";
 import { useEffect, useId, useRef, useState } from "react";
 import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { FilePipelineTracker } from "@/components/upload/file-pipeline-tracker";
 import type { IngestJobSnapshot } from "@/lib/edison/ingest-job-store";
 import type { ManualIngestResult } from "@/lib/edison/service";
@@ -60,6 +61,7 @@ const REVIEW_REDIRECT_DELAY_MS = 1800;
 export function UploadBatchForm({ blobReady }: UploadBatchFormProps) {
   const router = useRouter();
   const filesInputId = useId();
+  const filesLabelId = useId();
   const folderInputId = useId();
   const promptInputId = useId();
   const formRef = useRef<HTMLFormElement | null>(null);
@@ -276,24 +278,46 @@ export function UploadBatchForm({ blobReady }: UploadBatchFormProps) {
       >
         <div className="grid gap-5 md:grid-cols-[2fr_1fr]">
           <div>
-            <label
-              htmlFor={filesInputId}
+            <span
+              id={filesLabelId}
               className="block text-[11px] font-semibold uppercase tracking-wide text-muted-foreground"
             >
               Files
-            </label>
-            <input
-              id={filesInputId}
-              name="files"
-              type="file"
-              multiple
-              accept={ACCEPT_ATTR}
-              required
-              onChange={(event) =>
-                setFiles(Array.from(event.currentTarget.files ?? []))
-              }
-              className="mt-2 block w-full cursor-pointer rounded-md border border-dashed border-border bg-background px-3 py-3 text-sm file:mr-3 file:rounded-md file:border-0 file:bg-muted file:px-3 file:py-1.5 file:text-[12px] file:font-medium file:text-foreground hover:file:bg-muted/80"
-            />
+            </span>
+            <div className="mt-2 rounded-md border border-dashed border-border bg-background px-3 py-3">
+              <input
+                id={filesInputId}
+                name="files"
+                type="file"
+                multiple
+                accept={ACCEPT_ATTR}
+                required
+                disabled={busy}
+                aria-labelledby={filesLabelId}
+                onChange={(event) =>
+                  setFiles(Array.from(event.currentTarget.files ?? []))
+                }
+                className="sr-only"
+              />
+              <div className="flex flex-wrap items-center gap-3">
+                <label
+                  htmlFor={filesInputId}
+                  className={cn(
+                    buttonVariants({ variant: "outline", size: "default" }),
+                    "cursor-pointer",
+                    busy && "pointer-events-none opacity-50",
+                  )}
+                >
+                  <UploadIcon aria-hidden="true" />
+                  {files.length > 0 ? "Change files" : "Choose files"}
+                </label>
+                {files.length === 0 ? (
+                  <span className="text-sm text-muted-foreground">
+                    No files selected
+                  </span>
+                ) : null}
+              </div>
+            </div>
             <p className="mt-2 text-[12px] text-muted-foreground">
               PDFs and image files (JPEG, PNG, WebP, GIF, TIFF). Multi-page
               PDFs are sent whole to the OCR model.
