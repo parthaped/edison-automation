@@ -6,9 +6,39 @@
 // ourselves so we can encode the rendered surface to JPEG without going
 // through any DOM API. Both packages are listed in `serverExternalPackages`
 // in next.config.ts so the bundler doesn't try to inline the native binding.
+//
+// In serverless deployments the worker script is not traced unless we import it
+// from application code. pdfjs falls back to a dynamic import of
+// `./pdf.worker.mjs`, which is missing from `/var/task` when only `pdf.mjs`
+// is copied. Registering the worker on `globalThis` and setting an absolute
+// `workerSrc` avoids that brittle relative import.
 
 import { createCanvas } from "@napi-rs/canvas";
-import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
+import { createRequire } from "node:module";
+import { pathToFileURL } from "node:url";
+import {
+  getDocument,
+  GlobalWorkerOptions,
+} from "pdfjs-dist/legacy/build/pdf.mjs";
+import * as pdfWorker from "pdfjs-dist/legacy/build/pdf.worker.mjs";
+
+declare global {
+  // pdfjs checks this before dynamic-importing the worker in Node.
+  var pdfjsWorker: typeof pdfWorker | undefined;
+}
+
+function configurePdfJsWorker(): void {
+  globalThis.pdfjsWorker ??= pdfWorker;
+
+  if (!GlobalWorkerOptions.workerSrc) {
+    const require = createRequire(import.meta.url);
+    GlobalWorkerOptions.workerSrc = pathToFileURL(
+      require.resolve("pdfjs-dist/legacy/build/pdf.worker.mjs"),
+    ).href;
+  }
+}
+
+configurePdfJsWorker();
 
 // Render at 2x the PDF's native scale by default. That is enough to make
 // handwriting and small marginalia legible in the viewer without bloating blob
