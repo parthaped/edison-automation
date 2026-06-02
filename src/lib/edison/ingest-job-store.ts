@@ -20,6 +20,10 @@ export interface FileSnapshot {
   finishedAt?: string;
   documentId?: string;
   errorMessage?: string;
+  // Non-fatal warning attached to a file (e.g. rasterization failed but
+  // transcription still succeeded). Surfaced in the upload tracker without
+  // marking the file failed.
+  warningMessage?: string;
 }
 
 export interface IngestJobSnapshot {
@@ -68,6 +72,12 @@ export interface FileFailedPayload {
   at: string;
 }
 
+export interface FileWarningPayload {
+  fileName: string;
+  message: string;
+  at: string;
+}
+
 export interface BatchCompletedPayload {
   at: string;
   result: ManualIngestResult;
@@ -88,6 +98,7 @@ export type BatchEvent =
   | ({ type: "file-stage" } & FileStagePayload)
   | ({ type: "file-completed" } & FileCompletedPayload)
   | ({ type: "file-failed" } & FileFailedPayload)
+  | ({ type: "file-warning" } & FileWarningPayload)
   | ({ type: "batch-completed" } & BatchCompletedPayload)
   | ({ type: "batch-failed" } & BatchFailedPayload);
 
@@ -195,6 +206,16 @@ export function applyBatchEvent(
           stage: "failed",
           errorMessage: event.message,
           finishedAt: event.at,
+        })),
+      };
+
+    case "file-warning":
+      return {
+        ...snapshot,
+        updatedAt: event.at,
+        perFile: upsertFile(snapshot.perFile, event.fileName, (entry) => ({
+          ...entry,
+          warningMessage: event.message,
         })),
       };
 

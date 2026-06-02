@@ -8,11 +8,17 @@ describe("mapLocalOcrResponse", () => {
       model: "local/trocr-base-edison-v1",
     });
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       ocrText: "Body with [filament?]",
       uncertainReadings: ["[filament?]"],
       model: "local/trocr-base-edison-v1",
       promptVersion: "local-htr-v1",
+    });
+    expect(result.subDocuments).toHaveLength(1);
+    expect(result.subDocuments[0]).toMatchObject({
+      startPage: 1,
+      endPage: 1,
+      ocrText: "Body with [filament?]",
     });
   });
 
@@ -28,6 +34,7 @@ describe("mapLocalOcrResponse", () => {
 
     expect(result.ocrText).toBe("First page\n\nSecond page");
     expect(result.promptVersion).toBe("local-htr-v2");
+    expect(result.subDocuments[0].endPage).toBe(2);
   });
 });
 

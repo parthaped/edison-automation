@@ -42,6 +42,30 @@ export interface PageImage {
   width?: number;
   height?: number;
   originalUrl?: string;
+  // Populated when this page could not be rendered (e.g. PDF rasterization
+  // failed). The viewer surfaces this in the source-image placeholder so the
+  // reviewer can see *why* the image is missing instead of an empty frame.
+  renderError?: string;
+}
+
+// Identifies a cluster of DocumentPackages that were all extracted from the
+// same uploaded source file (typically a multi-document PDF). One source PDF
+// becomes one `groupId`; each detected sub-document becomes its own
+// DocumentPackage that shares the group. A single-document upload still gets
+// a sourceGroup with one sibling so the data model is uniform.
+export interface SourceGroup {
+  groupId: string;
+  originalFileName: string;
+  // 0-based position of this sibling within the group, ordered by the
+  // sub-document's page range. Used for stable navigation and id suffixing.
+  position: number;
+  // Document ids of every sibling (including this one), in document order.
+  // Lets the viewer show a quick navigator without an extra repository
+  // round-trip.
+  siblingIds: string[];
+  // The total page count of the parent PDF, retained so the splits editor
+  // can validate that user-edited ranges stay within the source.
+  totalPages: number;
 }
 
 export interface DocumentPackage {
@@ -57,6 +81,10 @@ export interface DocumentPackage {
   uncertaintyNotes: string[];
   createdAt: string;
   updatedAt: string;
+  // Present when this document was extracted from a multi-document source
+  // (or a single-document source with split metadata). Used by the reviewer
+  // workbench to surface siblings and the split editor.
+  sourceGroup?: SourceGroup;
 }
 
 export interface TranscriptionRun {

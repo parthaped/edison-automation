@@ -7,7 +7,10 @@ import {
 import { assignDocumentId, normalizeFolderId } from "../id-policy";
 import type { BatchEvent } from "../ingest-job-store";
 import { rasterizePdfPages } from "../rasterize-pdf";
-import { processSourceFile, mergeTranscribedMetadata, resolvePersistedDocumentStatus } from "../service";
+import {
+  processSourceFileSubDocuments,
+  type TranscribedSubDocument,
+} from "../service";
 import type {
   ManualIngestResult,
   PageImageUrl,
@@ -17,7 +20,6 @@ import { getEdisonService } from "../service-factory";
 import {
   isTranscribableMediaType,
   transcribeDocument,
-  type TranscribedMetadata,
 } from "../transcribe";
 import type {
   DocumentPackage,
@@ -41,10 +43,12 @@ export interface BatchIngestWorkflowInput {
 
 interface FileResult {
   fileName: string;
-  documentId: string;
-  documentPackage: DocumentPackage;
-  transcription: TranscriptionRun;
-  metadata: MetadataExtraction;
+  // First sibling's document ID (or the lone document ID for single-doc files).
+  // Used to surface a primary record in the per-file pipeline tracker.
+  primaryDocumentId: string;
+  documentPackages: DocumentPackage[];
+  transcriptions: TranscriptionRun[];
+  metadata: MetadataExtraction[];
   errors: TranscriptionError[];
 }
 
@@ -154,26 +158,26 @@ async function processOneFile(input: ProcessOneFileInput): Promise<FileResult> {
 
   // Rasterize in its own step so it gets its own 60s budget separate from the
   // OCR call. PDFs become per-page JPGs in Blob; image uploads pass through.
-  const pageImageUrls = await rasterizeFileStep({ blob, documentId });
+  const rasterized = await rasterizeFileStep({ blob, documentId });
 
-  const persisted = await persistFileStep({
+  const persisted = await persistSubDocumentsStep({
     folderId,
     blob,
     batchIndex,
     documentId,
-    ocrText: transcribed.ocrText,
+    subDocuments: transcribed.subDocuments,
     model: transcribed.model,
     inputTokens: transcribed.inputTokens,
     outputTokens: transcribed.outputTokens,
-    metadata: transcribed.metadata,
-    pageImageUrls,
+    pageImageUrls: rasterized.urls,
+    rasterizeError: rasterized.error,
   });
 
   return {
     fileName: blob.name,
-    documentId: persisted.documentPackage.documentId,
-    documentPackage: persisted.documentPackage,
-    transcription: persisted.transcription,
+    primaryDocumentId: persisted.documentPackages[0]?.documentId ?? documentId,
+    documentPackages: persisted.documentPackages,
+    transcriptions: persisted.transcriptions,
     metadata: persisted.metadata,
     errors: transcribed.errors,
   };
@@ -234,11 +238,14 @@ interface TranscribeFileStepInput {
 }
 
 interface TranscribeFileStepResult {
-  ocrText?: string;
+  // Sub-documents detected by the model. Always populated: AI-enabled paths
+  // return what the model produced; AI-disabled or transcription-failure paths
+  // return an empty array so the persist step still emits a single placeholder
+  // sub-document covering every page.
+  subDocuments: TranscribedSubDocument[];
   model?: string;
   inputTokens?: number;
   outputTokens?: number;
-  metadata?: TranscribedMetadata;
   errors: TranscriptionError[];
 }
 
@@ -277,11 +284,10 @@ async function transcribeFileStep(
         promptTask,
       });
       return {
-        ocrText: transcribed.ocrText,
+        subDocuments: transcribed.subDocuments,
         model: transcribed.model,
         inputTokens: transcribed.inputTokens,
         outputTokens: transcribed.outputTokens,
-        metadata: transcribed.metadata,
         errors,
       };
     } catch (error) {
@@ -295,7 +301,7 @@ async function transcribeFileStep(
     }
   }
 
-  return { errors };
+  return { subDocuments: [], errors };
 }
 
 interface RasterizeFileStepInput {
@@ -303,18 +309,28 @@ interface RasterizeFileStepInput {
   documentId: string;
 }
 
+interface RasterizeFileStepResult {
+  urls: PageImageUrl[];
+  // Populated when PDF rasterization could not produce any page images. The
+  // persist step copies this into `validationWarnings` and `PageImage.renderError`
+  // so the reviewer sees *why* the source image is missing instead of an
+  // empty frame.
+  error?: string;
+}
+
 // Step 1.5: render each PDF page to a JPG and upload it to Blob, returning a
 // per-page URL list the persist step then attaches to the document. Image
 // uploads short-circuit to a single entry pointing at the original blob URL,
 // so the viewer renders them through the same `<img>` path as PDF pages.
 //
-// Failures are intentionally non-fatal: we emit a stage event and return an
-// empty list. The document still persists, just with the FacsimileSheet
-// placeholder in the viewer (matching the pre-rasterizer behavior). This keeps
-// a single bad PDF from poisoning a whole batch.
+// Failures are non-fatal: we record the reason on the result so the persist
+// step can attach it to the saved DocumentPackage, and we emit a `file-warning`
+// event so the reviewer sees it in the upload tracker. This keeps a single
+// bad PDF from poisoning a whole batch while making the failure visible
+// instead of degrading silently into a blank placeholder.
 async function rasterizeFileStep(
   input: RasterizeFileStepInput,
-): Promise<PageImageUrl[]> {
+): Promise<RasterizeFileStepResult> {
   "use step";
 
   const { blob, documentId } = input;
@@ -322,9 +338,9 @@ async function rasterizeFileStep(
 
   if (contentType !== "application/pdf") {
     if (contentType.startsWith("image/")) {
-      return [{ pageIndex: 0, url: blob.url }];
+      return { urls: [{ pageIndex: 0, url: blob.url }] };
     }
-    return [];
+    return { urls: [] };
   }
 
   await emitEvent({
@@ -360,45 +376,58 @@ async function rasterizeFileStep(
         height: page.height,
       });
     }
-    return uploaded;
+    return { urls: uploaded };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.warn("[batch-ingest] rasterize:failed", {
       fileName: blob.name,
       message,
     });
-    return [];
+    const summary = `PDF rasterization failed: ${message}`;
+    await emitEvent({
+      type: "file-warning",
+      fileName: blob.name,
+      message: summary,
+      at: new Date().toISOString(),
+    });
+    return { urls: [], error: summary };
   }
 }
 
-interface PersistFileStepInput {
+interface PersistSubDocumentsStepInput {
   folderId?: string;
   blob: BlobRef;
   batchIndex: number;
+  // The pre-assigned base document id for the uploaded source. Position-0
+  // sibling keeps this id; positions 1..N get suffixed.
   documentId: string;
-  ocrText?: string;
+  subDocuments: TranscribedSubDocument[];
   model?: string;
   inputTokens?: number;
   outputTokens?: number;
-  metadata?: TranscribedMetadata;
   pageImageUrls: PageImageUrl[];
+  // Carried through from the rasterize step so every persisted sibling can
+  // surface the failure reason via `validationWarnings` and per-page
+  // `renderError`. Undefined when rasterization succeeded.
+  rasterizeError?: string;
 }
 
-interface PersistFileStepResult {
-  documentPackage: DocumentPackage;
-  transcription: TranscriptionRun;
-  metadata: MetadataExtraction;
+interface PersistSubDocumentsStepResult {
+  documentPackages: DocumentPackage[];
+  transcriptions: TranscriptionRun[];
+  metadata: MetadataExtraction[];
 }
 
-// Step 2: extract pages, merge the folded metadata, and persist the document
-// (no AI call). Per-page image URLs from the rasterize step are attached so
-// the viewer can render the original alongside the transcription.
-async function persistFileStep(
-  input: PersistFileStepInput,
-): Promise<PersistFileStepResult> {
+// Step 2: extract pages, mint sibling ids for every detected sub-document,
+// build per-sibling page subsets + transcriptions + metadata, and persist
+// every record (no AI call). Single-document uploads collapse to one
+// sibling so the surrounding flow stays uniform.
+async function persistSubDocumentsStep(
+  input: PersistSubDocumentsStepInput,
+): Promise<PersistSubDocumentsStepResult> {
   "use step";
 
-  const { folderId, blob, batchIndex, documentId, ocrText, model } = input;
+  const { folderId, blob, batchIndex, documentId } = input;
 
   await emitEvent({
     type: "file-stage",
@@ -415,50 +444,48 @@ async function persistFileStep(
     mimeType: blob.contentType,
   };
 
-  // The document ID was already assigned collision-free in assignIdsStep, so we
-  // preserve it as-is and pass an empty existing-ID set (no per-file store scan).
-  const processed = await processSourceFile({
+  const processed = await processSourceFileSubDocuments({
     sourceFile,
     bytes,
     folderId,
     batchIndex,
     existingIds: new Set(),
     providedDocumentId: documentId,
-    rawOcrText: ocrText,
-    model,
+    subDocuments: input.subDocuments,
+    model: input.model,
+    inputTokens: input.inputTokens,
+    outputTokens: input.outputTokens,
     pageImageUrls: input.pageImageUrls,
+    rasterizeError: input.rasterizeError,
   });
 
-  const transcription: TranscriptionRun = {
-    ...processed.transcription,
-    inputTokens: input.inputTokens ?? processed.transcription.inputTokens,
-    outputTokens: input.outputTokens ?? processed.transcription.outputTokens,
-  };
-  const documentPackage: DocumentPackage = resolvePersistedDocumentStatus(
-    processed.documentPackage,
-  );
+  const repository = getEdisonService().getRepository();
+  for (const sibling of processed.siblings) {
+    await repository.saveProcessedDocument(
+      sibling.documentPackage,
+      sibling.transcription,
+      sibling.metadata,
+    );
+  }
 
-  const metadata: MetadataExtraction = mergeTranscribedMetadata(
-    processed.metadata,
-    input.metadata,
-  );
-
-  await getEdisonService()
-    .getRepository()
-    .saveProcessedDocument(documentPackage, transcription, metadata);
-
+  const primary = processed.siblings[0]?.documentPackage;
   await emitEvent({
     type: "file-completed",
     fileName: blob.name,
-    documentId: documentPackage.documentId,
+    documentId: primary?.documentId ?? documentId,
     at: new Date().toISOString(),
   });
   console.info("[batch-ingest] file:done", {
     fileName: blob.name,
-    documentId: documentPackage.documentId,
+    documentId: primary?.documentId ?? documentId,
+    siblings: processed.siblings.length,
   });
 
-  return { documentPackage, transcription, metadata };
+  return {
+    documentPackages: processed.siblings.map((s) => s.documentPackage),
+    transcriptions: processed.siblings.map((s) => s.transcription),
+    metadata: processed.siblings.map((s) => s.metadata),
+  };
 }
 
 async function emitFileFailedStep(input: {
@@ -519,9 +546,9 @@ async function finalizeBatchStep(input: {
 
 function buildResult(results: FileResult[]): ManualIngestResult {
   return {
-    packages: results.map((entry) => entry.documentPackage),
-    transcriptions: results.map((entry) => entry.transcription),
-    metadata: results.map((entry) => entry.metadata),
+    packages: results.flatMap((entry) => entry.documentPackages),
+    transcriptions: results.flatMap((entry) => entry.transcriptions),
+    metadata: results.flatMap((entry) => entry.metadata),
     transcriptionErrors: results.flatMap((entry) => entry.errors),
   };
 }

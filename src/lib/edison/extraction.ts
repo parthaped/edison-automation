@@ -83,6 +83,32 @@ export function buildPageManifest(
   }));
 }
 
+// Builds the page manifest for a sub-document that owns a contiguous slice of
+// the source PDF (pages startPage..endPage, both 1-based inclusive). The
+// returned pages are re-indexed from 0 so the viewer's "page X of N" matches
+// the sub-document, but `sourcePage` preserves the original PDF page number
+// so reviewers can cross-reference back to the source.
+export function buildPageManifestForRange(
+  documentId: string,
+  sourceName: string,
+  startPage: number,
+  endPage: number,
+): PageImage[] {
+  if (startPage < 1 || endPage < startPage) {
+    throw new Error(
+      `buildPageManifestForRange: invalid range ${startPage}..${endPage}`,
+    );
+  }
+  const length = endPage - startPage + 1;
+  return Array.from({ length }, (_, index) => ({
+    id: `${documentId}-page-${index + 1}`,
+    documentId,
+    pageIndex: index,
+    imageFilename: buildImageFilename(documentId, sourceName, index),
+    sourcePage: startPage + index,
+  }));
+}
+
 export async function createDocumentPackage(
   input: CreatePackageInput,
 ): Promise<DocumentPackage> {

@@ -196,4 +196,48 @@ export class InMemoryEdisonRepository implements EdisonRepository {
     }
     return rows;
   }
+
+  async listGroupSiblings(groupId: string): Promise<DocumentRecord[]> {
+    const siblings: DocumentRecord[] = [];
+    for (const document of this.documents.values()) {
+      if (document.sourceGroup?.groupId !== groupId) continue;
+      siblings.push({
+        document,
+        transcription:
+          this.transcriptions.get(document.documentId) ??
+          emptyTranscription(document.documentId),
+        metadata:
+          this.metadata.get(document.documentId) ?? emptyMetadata(document),
+      });
+    }
+    return siblings.sort(
+      (a, b) =>
+        (a.document.sourceGroup?.position ?? 0) -
+        (b.document.sourceGroup?.position ?? 0),
+    );
+  }
+
+  async replaceGroupSiblings(
+    groupId: string,
+    nextSiblings: DocumentRecord[],
+  ): Promise<void> {
+    const keepIds = new Set(
+      nextSiblings.map((record) => record.document.documentId),
+    );
+    const obsolete: string[] = [];
+    for (const [documentId, document] of this.documents.entries()) {
+      if (document.sourceGroup?.groupId !== groupId) continue;
+      if (!keepIds.has(documentId)) obsolete.push(documentId);
+    }
+    for (const documentId of obsolete) {
+      this.documents.delete(documentId);
+      this.transcriptions.delete(documentId);
+      this.metadata.delete(documentId);
+    }
+    for (const record of nextSiblings) {
+      this.documents.set(record.document.documentId, record.document);
+      this.transcriptions.set(record.document.documentId, record.transcription);
+      this.metadata.set(record.document.documentId, record.metadata);
+    }
+  }
 }

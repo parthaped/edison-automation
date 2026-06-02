@@ -44,12 +44,33 @@ export function mapLocalOcrResponse(
 ): TranscribeDocumentResult {
   const parsed = localOcrResponseSchema.parse(response);
   const ocrText = flattenPages(parsed);
+  const uncertainReadings =
+    parsed.uncertainReadings ?? extractUncertainReadings(ocrText);
+  const pageCount = parsed.pages?.length ?? 1;
+  // Local OCR doesn't detect document boundaries; treat the whole upload as
+  // a single sub-document so the workflow's persist step stays uniform.
   return {
     ocrText,
-    uncertainReadings:
-      parsed.uncertainReadings ?? extractUncertainReadings(ocrText),
+    uncertainReadings,
     model: parsed.model,
     promptVersion: parsed.promptVersion ?? "local-htr-v1",
+    subDocuments: [
+      {
+        startPage: 1,
+        endPage: Math.max(1, pageCount),
+        ocrText,
+        uncertainReadings,
+        metadata: {
+          title: "",
+          documentType: "Unknown",
+          date: "Unknown",
+          authors: [],
+          recipients: [],
+          mentionedNames: [],
+          subjects: [],
+        },
+      },
+    ],
   };
 }
 

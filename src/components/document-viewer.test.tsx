@@ -38,13 +38,37 @@ describe("DocumentViewer", () => {
     expect(pageInput.value).toBe("2");
   });
 
-  it("falls back to facsimile when originalUrl is missing", () => {
+  it("falls back to a neutral placeholder when originalUrl is missing", () => {
     renderViewer();
+    const placeholder = screen.getByLabelText(
+      /Page 1 source image unavailable/i,
+    );
+    expect(placeholder).toBeInTheDocument();
+    // The placeholder itself must not contain any fake document content.
+    // Scope the assertions to the placeholder node so genuine transcript
+    // text (e.g. "Edison Electric Light Co.") elsewhere in the viewer
+    // doesn't trip the check.
+    expect(placeholder).toHaveTextContent(/Source image not available/i);
+    expect(placeholder).not.toHaveTextContent(/Letterhead:/i);
+    expect(placeholder).not.toHaveTextContent(/W\. D\. Marks/i);
+    expect(placeholder).not.toHaveTextContent(/\[filament\?\]/i);
+  });
+
+  it("surfaces a per-page render error when present", () => {
+    const docWithError = {
+      ...multiPageDocument,
+      pages: multiPageDocument.pages.map((page, index) =>
+        index === 0
+          ? { ...page, renderError: "PDF rasterization failed: out of memory." }
+          : page,
+      ),
+    } as DocumentPackage;
+    renderViewer({ document: docWithError });
     expect(
-      screen.getByLabelText(/Page 1 facsimile/i),
+      screen.getByText(/Source image failed to render/i),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(/Source image not yet attached/i),
+      screen.getByText(/PDF rasterization failed: out of memory\./i),
     ).toBeInTheDocument();
   });
 

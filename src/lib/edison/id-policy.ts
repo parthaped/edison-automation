@@ -91,3 +91,29 @@ export function buildImageFilename(documentId: string, sourceName: string, pageI
   const page = String(pageIndex + 1).padStart(4, "0");
   return `${normalizeIdentifier(documentId)}/${imageBase || "page"}_${page}.jpg`;
 }
+
+// Builds a stable sibling identifier for a sub-document detected inside a
+// multi-document PDF. `position` is 0-based: position 0 keeps the base id
+// unchanged so a single-document upload's id is identical to the legacy
+// (pre-split) behavior. Positions 1+ get alphabetic suffixes that wrap to
+// double letters once Z is exhausted, so a PDF with 30 sub-documents still
+// produces unambiguous ids (...-Z, -AA, -AB, ...).
+export function appendSubDocumentSuffix(baseId: string, position: number): string {
+  if (!Number.isInteger(position) || position < 0) {
+    throw new Error(`appendSubDocumentSuffix: invalid position ${position}`);
+  }
+  if (position === 0) return baseId;
+  return `${baseId}-${toAlphabeticSuffix(position)}`;
+}
+
+function toAlphabeticSuffix(position: number): string {
+  // 1 -> "A", 26 -> "Z", 27 -> "AA". Standard spreadsheet-column encoding.
+  let n = position;
+  let suffix = "";
+  while (n > 0) {
+    const remainder = (n - 1) % 26;
+    suffix = String.fromCharCode(65 + remainder) + suffix;
+    n = Math.floor((n - 1) / 26);
+  }
+  return suffix;
+}

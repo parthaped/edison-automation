@@ -4,8 +4,12 @@ import { InMemoryEdisonRepository } from "./in-memory-repository";
 import {
   EdisonAutomationService,
   mergeTranscribedMetadata,
+  normalizeSubDocuments,
   processSourceFile,
+  processSourceFileSubDocuments,
   resolvePersistedDocumentStatus,
+  validateContiguousSplits,
+  type TranscribedSubDocument,
 } from "./service";
 import type { DocumentPackage, MetadataExtraction } from "./types";
 
@@ -190,6 +194,140 @@ describe("EdisonAutomationService", () => {
       status: 404,
     });
   });
+
+  it("updates group splits by rebuilding sibling documents", async () => {
+    const repository = new InMemoryEdisonRepository(false);
+    const file = await makeMultiPageUploadFile(
+      "group.pdf",
+      "application/pdf",
+      4,
+    );
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const initial = await processSourceFileSubDocuments({
+      sourceFile: {
+        id: "src-group",
+        name: file.name,
+        size: file.size,
+        mimeType: file.type,
+      },
+      bytes,
+      folderId: "D9032-F",
+      batchIndex: 1,
+      existingIds: new Set(),
+      providedDocumentId: "D9032-00040",
+      subDocuments: [
+        {
+          startPage: 1,
+          endPage: 2,
+          ocrText: "A",
+          uncertainReadings: [],
+          metadata: {
+            title: "Letter A",
+            documentType: "correspondence",
+            date: "1890",
+            authors: [],
+            recipients: [],
+            mentionedNames: [],
+            subjects: [],
+          },
+        },
+        {
+          startPage: 3,
+          endPage: 4,
+          ocrText: "B",
+          uncertainReadings: [],
+          metadata: {
+            title: "Letter B",
+            documentType: "correspondence",
+            date: "1891",
+            authors: [],
+            recipients: [],
+            mentionedNames: [],
+            subjects: [],
+          },
+        },
+      ],
+      pageImageUrls: Array.from({ length: 4 }, (_, i) => ({
+        pageIndex: i,
+        url: `https://blob.example/p${i + 1}.jpg`,
+      })),
+    });
+    for (const sibling of initial.siblings) {
+      await repository.saveProcessedDocument(
+        sibling.documentPackage,
+        sibling.transcription,
+        sibling.metadata,
+      );
+    }
+
+    const service = new EdisonAutomationService(repository);
+    const merged = await service.updateGroupSplits("D9032-00040", [
+      { startPage: 1, endPage: 4, title: "Combined" },
+    ]);
+
+    expect(merged).toHaveLength(1);
+    expect(merged[0].document.documentId).toBe("D9032-00040");
+    expect(merged[0].document.pages.map((p) => p.sourcePage)).toEqual([
+      1, 2, 3, 4,
+    ]);
+    // The new single sibling replaces the second sibling (-A).
+    const survivors = await repository.listDocumentIds();
+    expect(survivors).toContain("D9032-00040");
+    expect(survivors).not.toContain("D9032-00040-A");
+  });
+
+  it("rejects splits that do not cover every page", async () => {
+    const repository = new InMemoryEdisonRepository(false);
+    const file = await makeMultiPageUploadFile(
+      "group2.pdf",
+      "application/pdf",
+      3,
+    );
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const initial = await processSourceFileSubDocuments({
+      sourceFile: {
+        id: "src-group2",
+        name: file.name,
+        size: file.size,
+        mimeType: file.type,
+      },
+      bytes,
+      folderId: "D9032-F",
+      batchIndex: 2,
+      existingIds: new Set(),
+      providedDocumentId: "D9032-00050",
+      subDocuments: [
+        {
+          startPage: 1,
+          endPage: 3,
+          ocrText: "",
+          uncertainReadings: [],
+          metadata: {
+            title: "",
+            documentType: "Unknown",
+            date: "Unknown",
+            authors: [],
+            recipients: [],
+            mentionedNames: [],
+            subjects: [],
+          },
+        },
+      ],
+    });
+    for (const sibling of initial.siblings) {
+      await repository.saveProcessedDocument(
+        sibling.documentPackage,
+        sibling.transcription,
+        sibling.metadata,
+      );
+    }
+    const service = new EdisonAutomationService(repository);
+    await expect(
+      service.updateGroupSplits("D9032-00050", [
+        { startPage: 1, endPage: 2 },
+      ]),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
 });
 
 describe("processSourceFile confidence", () => {
@@ -330,6 +468,362 @@ describe("resolvePersistedDocumentStatus", () => {
       basePackage({ status: "needs_review" }),
     );
     expect(result.status).toBe("needs_review");
+  });
+});
+
+describe("validateContiguousSplits", () => {
+  it("accepts a single split that covers all pages", () => {
+    expect(() =>
+      validateContiguousSplits([{ startPage: 1, endPage: 5 }], 5),
+    ).not.toThrow();
+  });
+
+  it("accepts contiguous splits that cover all pages", () => {
+    expect(() =>
+      validateContiguousSplits(
+        [
+          { startPage: 1, endPage: 3 },
+          { startPage: 4, endPage: 7 },
+          { startPage: 8, endPage: 10 },
+        ],
+        10,
+      ),
+    ).not.toThrow();
+  });
+
+  it("rejects an empty splits array", () => {
+    expect(() => validateContiguousSplits([], 5)).toThrow(/at least one split/);
+  });
+
+  it("rejects a gap between splits", () => {
+    expect(() =>
+      validateContiguousSplits(
+        [
+          { startPage: 1, endPage: 3 },
+          { startPage: 5, endPage: 7 },
+        ],
+        7,
+      ),
+    ).toThrow(/must start at page 4/);
+  });
+
+  it("rejects an overlap between splits", () => {
+    expect(() =>
+      validateContiguousSplits(
+        [
+          { startPage: 1, endPage: 4 },
+          { startPage: 3, endPage: 7 },
+        ],
+        7,
+      ),
+    ).toThrow(/must start at page 5/);
+  });
+
+  it("rejects splits that do not cover the final page", () => {
+    expect(() =>
+      validateContiguousSplits(
+        [
+          { startPage: 1, endPage: 3 },
+          { startPage: 4, endPage: 5 },
+        ],
+        7,
+      ),
+    ).toThrow(/last split ends at 5/);
+  });
+
+  it("rejects an endPage beyond the source page count", () => {
+    expect(() =>
+      validateContiguousSplits([{ startPage: 1, endPage: 9 }], 5),
+    ).toThrow(/beyond the source's 5 pages/);
+  });
+});
+
+describe("normalizeSubDocuments", () => {
+  const blankMetadata = {
+    title: "",
+    documentType: "Unknown",
+    date: "Unknown",
+    authors: [],
+    recipients: [],
+    mentionedNames: [],
+    subjects: [],
+  };
+
+  function makeSub(
+    startPage: number,
+    endPage: number,
+  ): TranscribedSubDocument {
+    return {
+      startPage,
+      endPage,
+      ocrText: "",
+      uncertainReadings: [],
+      metadata: blankMetadata,
+    };
+  }
+
+  it("falls back to a single full-document entry when input is empty", () => {
+    const result = normalizeSubDocuments([], 6);
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({ startPage: 1, endPage: 6 });
+  });
+
+  it("sorts entries and clamps to the source page count", () => {
+    const result = normalizeSubDocuments(
+      [makeSub(5, 9), makeSub(1, 2), makeSub(3, 4)],
+      6,
+    );
+    expect(result.map((entry) => [entry.startPage, entry.endPage])).toEqual([
+      [1, 2],
+      [3, 4],
+      [5, 6],
+    ]);
+  });
+
+  it("trims overlaps so siblings stay disjoint", () => {
+    const result = normalizeSubDocuments(
+      [makeSub(1, 4), makeSub(3, 6)],
+      6,
+    );
+    expect(result.map((entry) => [entry.startPage, entry.endPage])).toEqual([
+      [1, 4],
+      [5, 6],
+    ]);
+  });
+
+  it("drops entries fully covered by an earlier sibling", () => {
+    const result = normalizeSubDocuments(
+      [makeSub(1, 5), makeSub(2, 4)],
+      5,
+    );
+    expect(result.map((entry) => [entry.startPage, entry.endPage])).toEqual([
+      [1, 5],
+    ]);
+  });
+});
+
+describe("processSourceFileSubDocuments", () => {
+  it("produces one sibling for a single-document PDF", async () => {
+    const file = await makeMultiPageUploadFile(
+      "single.pdf",
+      "application/pdf",
+      2,
+    );
+    const bytes = new Uint8Array(await file.arrayBuffer());
+
+    const result = await processSourceFileSubDocuments({
+      sourceFile: {
+        id: "src-single",
+        name: file.name,
+        size: file.size,
+        mimeType: file.type,
+      },
+      bytes,
+      folderId: "D9032-F",
+      batchIndex: 1,
+      existingIds: new Set(),
+      providedDocumentId: "D9032-00010",
+      subDocuments: [
+        {
+          startPage: 1,
+          endPage: 2,
+          ocrText: "Hello",
+          uncertainReadings: [],
+          metadata: {
+            title: "Single doc",
+            documentType: "correspondence",
+            date: "1890",
+            authors: [],
+            recipients: [],
+            mentionedNames: [],
+            subjects: [],
+          },
+        },
+      ],
+      pageImageUrls: [
+        { pageIndex: 0, url: "https://blob.example/p1.jpg", width: 100, height: 200 },
+        { pageIndex: 1, url: "https://blob.example/p2.jpg" },
+      ],
+    });
+
+    expect(result.blocked).toBe(false);
+    expect(result.siblings).toHaveLength(1);
+    const [sibling] = result.siblings;
+    expect(sibling.documentPackage.documentId).toBe("D9032-00010");
+    expect(sibling.documentPackage.pages).toHaveLength(2);
+    expect(sibling.documentPackage.pages[0].originalUrl).toBe(
+      "https://blob.example/p1.jpg",
+    );
+    expect(sibling.documentPackage.sourceGroup).toMatchObject({
+      groupId: "D9032-00010",
+      siblingIds: ["D9032-00010"],
+      totalPages: 2,
+      position: 0,
+    });
+    expect(sibling.transcription.diplomaticText).toBe("Hello");
+  });
+
+  it("produces N siblings with suffixed ids and per-sibling pages", async () => {
+    const file = await makeMultiPageUploadFile(
+      "triple.pdf",
+      "application/pdf",
+      6,
+    );
+    const bytes = new Uint8Array(await file.arrayBuffer());
+
+    const result = await processSourceFileSubDocuments({
+      sourceFile: {
+        id: "src-triple",
+        name: file.name,
+        size: file.size,
+        mimeType: file.type,
+      },
+      bytes,
+      folderId: "D9032-F",
+      batchIndex: 1,
+      existingIds: new Set(),
+      providedDocumentId: "D9032-00020",
+      subDocuments: [
+        {
+          startPage: 1,
+          endPage: 2,
+          ocrText: "First letter",
+          uncertainReadings: [],
+          metadata: {
+            title: "First",
+            documentType: "correspondence",
+            date: "1890",
+            authors: [],
+            recipients: [],
+            mentionedNames: [],
+            subjects: [],
+          },
+        },
+        {
+          startPage: 3,
+          endPage: 4,
+          ocrText: "Second letter",
+          uncertainReadings: [],
+          metadata: {
+            title: "Second",
+            documentType: "correspondence",
+            date: "1891",
+            authors: [],
+            recipients: [],
+            mentionedNames: [],
+            subjects: [],
+          },
+        },
+        {
+          startPage: 5,
+          endPage: 6,
+          ocrText: "Third letter",
+          uncertainReadings: [],
+          metadata: {
+            title: "Third",
+            documentType: "memorandum",
+            date: "1892",
+            authors: [],
+            recipients: [],
+            mentionedNames: [],
+            subjects: [],
+          },
+        },
+      ],
+      pageImageUrls: Array.from({ length: 6 }, (_, i) => ({
+        pageIndex: i,
+        url: `https://blob.example/p${i + 1}.jpg`,
+      })),
+    });
+
+    expect(result.blocked).toBe(false);
+    expect(result.siblings).toHaveLength(3);
+    expect(result.siblings.map((s) => s.documentPackage.documentId)).toEqual([
+      "D9032-00020",
+      "D9032-00020-A",
+      "D9032-00020-B",
+    ]);
+
+    expect(
+      result.siblings.map(
+        (s) => s.documentPackage.sourceGroup?.position,
+      ),
+    ).toEqual([0, 1, 2]);
+
+    expect(
+      result.siblings[0].documentPackage.sourceGroup?.siblingIds,
+    ).toEqual(["D9032-00020", "D9032-00020-A", "D9032-00020-B"]);
+
+    const [first, second, third] = result.siblings;
+    expect(first.documentPackage.pages.map((p) => p.sourcePage)).toEqual([1, 2]);
+    expect(second.documentPackage.pages.map((p) => p.sourcePage)).toEqual([3, 4]);
+    expect(third.documentPackage.pages.map((p) => p.sourcePage)).toEqual([5, 6]);
+
+    expect(first.documentPackage.pages[0].originalUrl).toBe(
+      "https://blob.example/p1.jpg",
+    );
+    expect(second.documentPackage.pages[0].originalUrl).toBe(
+      "https://blob.example/p3.jpg",
+    );
+    expect(third.documentPackage.pages[1].originalUrl).toBe(
+      "https://blob.example/p6.jpg",
+    );
+
+    expect(first.metadata.title).toBe("First");
+    expect(second.metadata.title).toBe("Second");
+  });
+
+  it("stamps renderError onto every page when rasterization failed", async () => {
+    const file = await makeMultiPageUploadFile(
+      "broken.pdf",
+      "application/pdf",
+      2,
+    );
+    const bytes = new Uint8Array(await file.arrayBuffer());
+
+    const result = await processSourceFileSubDocuments({
+      sourceFile: {
+        id: "src-broken",
+        name: file.name,
+        size: file.size,
+        mimeType: file.type,
+      },
+      bytes,
+      folderId: "D9032-F",
+      batchIndex: 1,
+      existingIds: new Set(),
+      providedDocumentId: "D9032-00030",
+      subDocuments: [
+        {
+          startPage: 1,
+          endPage: 2,
+          ocrText: "x",
+          uncertainReadings: [],
+          metadata: {
+            title: "",
+            documentType: "Unknown",
+            date: "Unknown",
+            authors: [],
+            recipients: [],
+            mentionedNames: [],
+            subjects: [],
+          },
+        },
+      ],
+      pageImageUrls: [],
+      rasterizeError: "PDF rasterization failed: boom",
+    });
+
+    expect(result.blocked).toBe(false);
+    const sibling = result.siblings[0];
+    expect(
+      sibling.documentPackage.pages.every(
+        (p) => p.renderError === "PDF rasterization failed: boom",
+      ),
+    ).toBe(true);
+    expect(sibling.documentPackage.validationWarnings).toContain(
+      "PDF rasterization failed: boom",
+    );
   });
 });
 

@@ -71,6 +71,18 @@ export interface EdisonRepository {
       transcription: TranscriptionRun;
     }>
   >;
+  // Returns every sibling DocumentRecord that shares a `sourceGroup.groupId`,
+  // ordered by `sourceGroup.position`. Used by the splits editor to load the
+  // current set of siblings before replacing them.
+  listGroupSiblings(groupId: string): Promise<DocumentRecord[]>;
+  // Atomically replaces the entire set of siblings for a given group: removes
+  // any existing siblings whose ids are not in the new set, then writes every
+  // record in `nextSiblings`. Used by the splits editor when the reviewer
+  // changes page ranges (which can add, drop, or rename siblings).
+  replaceGroupSiblings(
+    groupId: string,
+    nextSiblings: DocumentRecord[],
+  ): Promise<void>;
 }
 
 export function summarizeDocuments(

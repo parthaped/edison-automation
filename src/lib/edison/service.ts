@@ -1,8 +1,17 @@
 import { AppError } from "./app-error";
 import { buildAuditTrail, type AuditEvent } from "./audit";
 import { extractUncertainReadings, gradeTranscription } from "./confidence";
-import { createDocumentPackage } from "./extraction";
+import {
+  buildPageManifestForRange,
+  createDocumentPackage,
+  createExtractionPlan,
+} from "./extraction";
 import { buildExportCsv, buildExportCsvRow } from "./export-csv";
+import {
+  appendSubDocumentSuffix,
+  assignDocumentId,
+  normalizeFolderId,
+} from "./id-policy";
 import { getActivePrompt } from "./prompts";
 import type { TranscribedMetadata } from "./transcribe";
 import type {
@@ -21,6 +30,7 @@ import type {
   DocumentPackage,
   MetadataExtraction,
   SourceFile,
+  SourceGroup,
   TranscriptionRun,
 } from "./types";
 
@@ -65,8 +75,12 @@ export interface ProcessSourceFileInput {
   // Per-page durable URLs to render in the viewer. Single-image uploads supply
   // exactly one entry for `pageIndex: 0`; multi-page PDFs are rasterized to
   // JPGs upstream and supply one entry per page. Pages without an entry fall
-  // back to the FacsimileSheet placeholder.
+  // back to a neutral "source image unavailable" placeholder.
   pageImageUrls?: PageImageUrl[];
+  // When PDF rasterization failed upstream, this message is folded into
+  // `validationWarnings` and stamped onto every page's `renderError` so the
+  // viewer can show *why* the source image is missing.
+  rasterizeError?: string;
 }
 
 export interface PageImageUrl {
@@ -133,28 +147,45 @@ export async function processSourceFile(
 
   // Attach the per-page rendered image URLs supplied by the rasterize step.
   // PDFs come back with one URL per page; image uploads come back with a
-  // single entry for page 0. Pages without a URL keep the FacsimileSheet
-  // placeholder and a disabled download button in the viewer.
+  // single entry for page 0. Pages without a URL keep the neutral
+  // "source image unavailable" placeholder and a disabled download button.
   const urlByPageIndex = new Map<number, PageImageUrl>();
   for (const entry of input.pageImageUrls ?? []) {
     urlByPageIndex.set(entry.pageIndex, entry);
   }
-  const packageWithUrls: DocumentPackage =
-    urlByPageIndex.size > 0 && built.pages.length > 0
+
+  const builtWithPageRenderState: DocumentPackage =
+    built.pages.length > 0
       ? {
           ...built,
           pages: built.pages.map((page) => {
             const match = urlByPageIndex.get(page.pageIndex);
-            if (!match) return page;
-            return {
-              ...page,
-              originalUrl: match.url,
-              ...(match.width !== undefined ? { width: match.width } : {}),
-              ...(match.height !== undefined ? { height: match.height } : {}),
-            };
+            if (match) {
+              return {
+                ...page,
+                originalUrl: match.url,
+                ...(match.width !== undefined ? { width: match.width } : {}),
+                ...(match.height !== undefined ? { height: match.height } : {}),
+              };
+            }
+            // No rendered URL for this page. Surface the rasterize error (if
+            // we have one) so the viewer's placeholder explains *why*.
+            return input.rasterizeError
+              ? { ...page, renderError: input.rasterizeError }
+              : page;
           }),
         }
       : built;
+
+  const packageWithUrls: DocumentPackage = input.rasterizeError
+    ? {
+        ...builtWithPageRenderState,
+        validationWarnings: [
+          ...builtWithPageRenderState.validationWarnings,
+          input.rasterizeError,
+        ],
+      }
+    : builtWithPageRenderState;
 
   const blocked = packageWithUrls.status === "blocked";
   const rawOcrText = input.rawOcrText ?? "";
@@ -206,6 +237,352 @@ export async function processSourceFile(
   };
 }
 
+// Validates that a user-supplied splits payload covers every page in the
+// source PDF exactly once: the splits must be sorted, contiguous, and cover
+// 1..totalPages. Throws AppError("BAD_REQUEST") on any violation; returns
+// silently on success.
+export function validateContiguousSplits(
+  splits: Array<{ startPage: number; endPage: number }>,
+  totalPages: number,
+): void {
+  if (!Array.isArray(splits) || splits.length === 0) {
+    throw new AppError("BAD_REQUEST", "Provide at least one split.", 400);
+  }
+  let cursor = 0;
+  for (const [index, split] of splits.entries()) {
+    if (!Number.isInteger(split.startPage) || !Number.isInteger(split.endPage)) {
+      throw new AppError(
+        "BAD_REQUEST",
+        `Split ${index + 1} must have integer page numbers.`,
+        400,
+      );
+    }
+    if (split.startPage !== cursor + 1) {
+      throw new AppError(
+        "BAD_REQUEST",
+        `Split ${index + 1} must start at page ${cursor + 1} but starts at ${split.startPage}.`,
+        400,
+      );
+    }
+    if (split.endPage < split.startPage) {
+      throw new AppError(
+        "BAD_REQUEST",
+        `Split ${index + 1} ends (${split.endPage}) before it starts (${split.startPage}).`,
+        400,
+      );
+    }
+    if (split.endPage > totalPages) {
+      throw new AppError(
+        "BAD_REQUEST",
+        `Split ${index + 1} ends at page ${split.endPage}, beyond the source's ${totalPages} pages.`,
+        400,
+      );
+    }
+    cursor = split.endPage;
+  }
+  if (cursor !== totalPages) {
+    throw new AppError(
+      "BAD_REQUEST",
+      `Splits must cover every page; last split ends at ${cursor} but source has ${totalPages} pages.`,
+      400,
+    );
+  }
+}
+
+// ---------- multi-sub-document processing ----------
+//
+// Used by the ingest workflow once the OCR model returns per-document
+// boundaries inside a single uploaded source. Single-document uploads pass
+// in one entry covering every page and get back exactly one sibling, so the
+// flow is uniform regardless of whether splits were detected.
+
+export interface TranscribedSubDocument {
+  startPage: number;
+  endPage: number;
+  ocrText: string;
+  uncertainReadings: string[];
+  metadata: TranscribedMetadata;
+}
+
+export interface ProcessSourceSubDocumentsInput {
+  sourceFile: SourceFile;
+  bytes: Uint8Array;
+  folderId?: string;
+  // Pre-assigned, collision-free base document identifier for this source
+  // file. Position-0 sibling keeps this id; siblings 1..N get suffixed via
+  // `appendSubDocumentSuffix`. When omitted, an id is derived from the
+  // filename + `existingIds`.
+  providedDocumentId?: string;
+  batchIndex: number;
+  existingIds: Set<string>;
+  // Sub-documents detected by the model. Length 1 for single-document
+  // uploads. Page numbers are 1-based and refer to the source PDF.
+  subDocuments: TranscribedSubDocument[];
+  model?: string;
+  pageImageUrls?: PageImageUrl[];
+  rasterizeError?: string;
+  inputTokens?: number;
+  outputTokens?: number;
+}
+
+export interface ProcessedSubDocument {
+  documentPackage: DocumentPackage;
+  transcription: TranscriptionRun;
+  metadata: MetadataExtraction;
+  confidence: ConfidenceBucket;
+}
+
+export interface ProcessSourceSubDocumentsResult {
+  // True when the source itself was rejected (encrypted PDF, unsupported
+  // type, etc.). When true, `siblings` holds a single blocked DocumentPackage
+  // with no sub-document split and no sourceGroup.
+  blocked: boolean;
+  siblings: ProcessedSubDocument[];
+}
+
+// Builds N reviewable DocumentPackages from one validated source. Each
+// sibling owns a contiguous page slice, links to its peers via `sourceGroup`,
+// and carries its own transcription + metadata extraction.
+export async function processSourceFileSubDocuments(
+  input: ProcessSourceSubDocumentsInput,
+): Promise<ProcessSourceSubDocumentsResult> {
+  const plan = await createExtractionPlan(input.sourceFile, input.bytes);
+  const folderId = input.folderId
+    ? normalizeFolderId(input.folderId)
+    : "UNASSIGNED-F";
+  const baseAssignment = assignDocumentId({
+    folderId,
+    providedDocumentId: input.providedDocumentId,
+    sourceName: input.sourceFile.name,
+    batchIndex: input.batchIndex,
+    existingIds: input.existingIds,
+  });
+
+  // Reject path: validation failed before we even reached the model. Persist
+  // a single blocked record so the reviewer sees the file but it's never
+  // approvable, and never carries a sourceGroup (no splits to manage).
+  if (plan.blockedReason) {
+    const now = new Date().toISOString();
+    const blockedPackage: DocumentPackage = {
+      id: baseAssignment.documentId,
+      folderId,
+      documentId: baseAssignment.documentId,
+      title: `[${baseAssignment.documentId}], ${input.sourceFile.name}`,
+      sourceFile: input.sourceFile,
+      pages: [],
+      status: "blocked",
+      confidence: "blocked",
+      validationWarnings: [
+        ...plan.warnings,
+        baseAssignment.reason,
+        plan.blockedReason,
+      ],
+      uncertaintyNotes: [],
+      createdAt: now,
+      updatedAt: now,
+    };
+    const transcription = emptyTranscription(baseAssignment.documentId);
+    const metadata = emptyMetadata(blockedPackage);
+    return {
+      blocked: true,
+      siblings: [
+        {
+          documentPackage: blockedPackage,
+          transcription,
+          metadata,
+          confidence: "blocked",
+        },
+      ],
+    };
+  }
+
+  const totalPages = Math.max(1, plan.pageCount);
+  const normalized = normalizeSubDocuments(input.subDocuments, totalPages);
+  const urlByPage = new Map<number, PageImageUrl>();
+  for (const entry of input.pageImageUrls ?? []) {
+    // pageImageUrls use 0-based pageIndex referring to the source PDF.
+    urlByPage.set(entry.pageIndex + 1, entry);
+  }
+
+  const diplomaticPrompt = getActivePrompt("diplomatic-transcription");
+  const groupId = baseAssignment.documentId;
+  const siblingIds = normalized.map((_sub, position) =>
+    appendSubDocumentSuffix(groupId, position),
+  );
+
+  const sourceGroupBase: Omit<SourceGroup, "position"> = {
+    groupId,
+    originalFileName: input.sourceFile.name,
+    siblingIds,
+    totalPages,
+  };
+
+  const siblings: ProcessedSubDocument[] = normalized.map((sub, position) => {
+    const documentId = siblingIds[position];
+    const pages = buildPageManifestForRange(
+      documentId,
+      input.sourceFile.name,
+      sub.startPage,
+      sub.endPage,
+    ).map((page) => {
+      const urlEntry = urlByPage.get(page.sourcePage);
+      if (urlEntry) {
+        return {
+          ...page,
+          originalUrl: urlEntry.url,
+          ...(urlEntry.width !== undefined ? { width: urlEntry.width } : {}),
+          ...(urlEntry.height !== undefined ? { height: urlEntry.height } : {}),
+        };
+      }
+      return input.rasterizeError
+        ? { ...page, renderError: input.rasterizeError }
+        : page;
+    });
+
+    const cleanedText = sub.ocrText.trim();
+    const uncertainReadings =
+      sub.uncertainReadings.length > 0
+        ? sub.uncertainReadings
+        : extractUncertainReadings(cleanedText);
+    const confidenceResult = gradeTranscription({
+      pageCount: pages.length,
+      blocked: false,
+      text: cleanedText,
+      uncertainReadings: uncertainReadings.length,
+    });
+
+    const now = new Date().toISOString();
+    const titleSuffix =
+      normalized.length > 1
+        ? ` (pages ${sub.startPage}\u2013${sub.endPage})`
+        : "";
+    const displayTitle = sub.metadata.title?.trim() || input.sourceFile.name;
+
+    const validationWarnings: string[] = [
+      ...plan.warnings,
+      ...(position === 0 ? [baseAssignment.reason] : []),
+    ];
+    if (input.rasterizeError) {
+      validationWarnings.push(input.rasterizeError);
+    }
+
+    const documentPackage: DocumentPackage = {
+      id: documentId,
+      folderId,
+      documentId,
+      title: `[${documentId}], ${displayTitle}${titleSuffix}`,
+      sourceFile: input.sourceFile,
+      pages,
+      status: "queued",
+      confidence: confidenceResult.bucket,
+      validationWarnings,
+      uncertaintyNotes: [],
+      createdAt: now,
+      updatedAt: now,
+      sourceGroup: {
+        ...sourceGroupBase,
+        position,
+      },
+    };
+
+    const transcription: TranscriptionRun = {
+      id: `${documentId}-run-1`,
+      documentId,
+      model: input.model ?? "gateway-configured-model",
+      promptVersion: diplomaticPrompt.version,
+      ocrText: sub.ocrText,
+      diplomaticText: cleanedText,
+      uncertainReadings,
+      // Token counts are emitted per-source by the AI Gateway. Attribute them
+      // to the first sibling so totals add up correctly without double-counting.
+      ...(position === 0 && input.inputTokens !== undefined
+        ? { inputTokens: input.inputTokens }
+        : {}),
+      ...(position === 0 && input.outputTokens !== undefined
+        ? { outputTokens: input.outputTokens }
+        : {}),
+    };
+
+    const metadata: MetadataExtraction = {
+      folderId,
+      documentId,
+      title: sub.metadata.title?.trim() || documentPackage.title,
+      documentType: sub.metadata.documentType || "Unknown",
+      date: sub.metadata.date || "Unknown",
+      authors: sub.metadata.authors,
+      recipients: sub.metadata.recipients,
+      mentionedNames: sub.metadata.mentionedNames,
+      subjects: sub.metadata.subjects,
+      imageNames: pages.map((page) => page.imageFilename),
+      confidence: confidenceResult.bucket,
+    };
+
+    return {
+      documentPackage: resolvePersistedDocumentStatus(documentPackage),
+      transcription,
+      metadata,
+      confidence: confidenceResult.bucket,
+    };
+  });
+
+  return { blocked: false, siblings };
+}
+
+// Sorts, clamps, and merges sub-document entries so downstream code can trust
+// the ranges. Behavior:
+//   - drops entries fully outside [1, totalPages]
+//   - clamps overlapping ranges so siblings stay disjoint (earlier sibling
+//     wins on overlap)
+//   - if the model returned nothing usable, falls back to one entry covering
+//     the entire source so we always emit at least one sibling
+export function normalizeSubDocuments(
+  subDocuments: TranscribedSubDocument[],
+  totalPages: number,
+): TranscribedSubDocument[] {
+  const sorted = [...subDocuments]
+    .map((entry) => ({
+      ...entry,
+      startPage: Math.max(1, Math.min(entry.startPage, totalPages)),
+      endPage: Math.max(1, Math.min(entry.endPage, totalPages)),
+    }))
+    .filter((entry) => entry.endPage >= entry.startPage)
+    .sort((a, b) => a.startPage - b.startPage);
+
+  const cleaned: TranscribedSubDocument[] = [];
+  let cursor = 0;
+  for (const entry of sorted) {
+    const start = Math.max(entry.startPage, cursor + 1);
+    if (start > entry.endPage) {
+      // Fully overlapped by an earlier sibling; drop it.
+      continue;
+    }
+    cleaned.push({ ...entry, startPage: start, endPage: entry.endPage });
+    cursor = entry.endPage;
+  }
+
+  if (cleaned.length === 0) {
+    return [
+      {
+        startPage: 1,
+        endPage: totalPages,
+        ocrText: "",
+        uncertainReadings: [],
+        metadata: {
+          title: "",
+          documentType: "Unknown",
+          date: "Unknown",
+          authors: [],
+          recipients: [],
+          mentionedNames: [],
+          subjects: [],
+        },
+      },
+    ];
+  }
+
+  return cleaned;
+}
+
 export class EdisonAutomationService {
   constructor(private readonly repository: EdisonRepository) {}
 
@@ -243,6 +620,156 @@ export class EdisonAutomationService {
   async getAuditTrail(): Promise<AuditEvent[]> {
     const records = await this.repository.listDocumentRecords();
     return buildAuditTrail(records);
+  }
+
+  async getGroupSiblings(groupId: string) {
+    const siblings = await this.repository.listGroupSiblings(groupId);
+    if (siblings.length === 0) {
+      throw new AppError("NOT_FOUND", "Document group was not found.", 404);
+    }
+    return siblings;
+  }
+
+  // Rewrites the entire set of siblings for a group from user-provided splits.
+  // Each split's page range is validated against the source PDF's total page
+  // count; ranges that match an existing sibling keep that sibling's
+  // transcription and metadata, while changed ranges produce a fresh sibling
+  // marked `needs_review` so the operator knows the AI output is stale.
+  async updateGroupSplits(
+    groupId: string,
+    splits: Array<{ startPage: number; endPage: number; title?: string }>,
+  ) {
+    const siblings = await this.getGroupSiblings(groupId);
+    const totalPages = siblings[0].document.sourceGroup?.totalPages ?? 0;
+    if (totalPages < 1) {
+      throw new AppError(
+        "BAD_REQUEST",
+        "This group has no recorded total page count and cannot be split.",
+        409,
+      );
+    }
+    validateContiguousSplits(splits, totalPages);
+
+    // Pre-compute a sourcePage → image url map by scanning every existing
+    // sibling's pages. Rasterization happens once per source upload, so
+    // reusing the URLs avoids re-rendering when only page ranges change.
+    const urlBySourcePage = new Map<
+      number,
+      { url: string; width?: number; height?: number; renderError?: string }
+    >();
+    for (const sibling of siblings) {
+      for (const page of sibling.document.pages) {
+        if (page.originalUrl && !urlBySourcePage.has(page.sourcePage)) {
+          urlBySourcePage.set(page.sourcePage, {
+            url: page.originalUrl,
+            width: page.width,
+            height: page.height,
+          });
+        } else if (page.renderError && !urlBySourcePage.has(page.sourcePage)) {
+          urlBySourcePage.set(page.sourcePage, { url: "", renderError: page.renderError });
+        }
+      }
+    }
+
+    // Index existing siblings by their (startPage, endPage) so unchanged splits
+    // can reuse their stored transcription text verbatim instead of being
+    // discarded and rebuilt empty.
+    const existingByRange = new Map<string, (typeof siblings)[number]>();
+    for (const sibling of siblings) {
+      const pages = sibling.document.pages;
+      if (pages.length === 0) continue;
+      const start = pages[0].sourcePage;
+      const end = pages[pages.length - 1].sourcePage;
+      existingByRange.set(`${start}-${end}`, sibling);
+    }
+
+    const sourceFile = siblings[0].document.sourceFile;
+    const folderId = siblings[0].document.folderId;
+    const newSiblingIds = splits.map((_, position) =>
+      appendSubDocumentSuffix(groupId, position),
+    );
+
+    const nextRecords = splits.map((split, position) => {
+      const documentId = newSiblingIds[position];
+      const rangeKey = `${split.startPage}-${split.endPage}`;
+      const reuse = existingByRange.get(rangeKey);
+
+      const pages = buildPageManifestForRange(
+        documentId,
+        sourceFile.name,
+        split.startPage,
+        split.endPage,
+      ).map((page) => {
+        const urlEntry = urlBySourcePage.get(page.sourcePage);
+        if (urlEntry?.url) {
+          return {
+            ...page,
+            originalUrl: urlEntry.url,
+            ...(urlEntry.width !== undefined ? { width: urlEntry.width } : {}),
+            ...(urlEntry.height !== undefined ? { height: urlEntry.height } : {}),
+          };
+        }
+        return urlEntry?.renderError
+          ? { ...page, renderError: urlEntry.renderError }
+          : page;
+      });
+
+      const now = new Date().toISOString();
+      const splitsChanged = !reuse;
+      const titleSeed =
+        split.title?.trim() ||
+        reuse?.metadata.title?.trim() ||
+        sourceFile.name;
+      const documentPackage: DocumentPackage = {
+        id: documentId,
+        folderId,
+        documentId,
+        title: `[${documentId}], ${titleSeed} (pages ${split.startPage}\u2013${split.endPage})`,
+        sourceFile,
+        pages,
+        status: splitsChanged ? "needs_review" : reuse.document.status,
+        confidence: reuse?.document.confidence ?? "medium",
+        validationWarnings: splitsChanged
+          ? ["Split edited \u2014 re-run transcription to refresh text."]
+          : reuse.document.validationWarnings,
+        uncertaintyNotes: reuse?.document.uncertaintyNotes ?? [],
+        createdAt: reuse?.document.createdAt ?? now,
+        updatedAt: now,
+        sourceGroup: {
+          groupId,
+          originalFileName: sourceFile.name,
+          position,
+          siblingIds: newSiblingIds,
+          totalPages,
+        },
+      };
+
+      const transcription: TranscriptionRun = reuse
+        ? {
+            ...reuse.transcription,
+            documentId,
+            id: `${documentId}-run-1`,
+          }
+        : emptyTranscription(documentId);
+
+      const metadata: MetadataExtraction = reuse
+        ? {
+            ...reuse.metadata,
+            documentId,
+            folderId,
+            title: titleSeed,
+            imageNames: pages.map((page) => page.imageFilename),
+          }
+        : {
+            ...emptyMetadata(documentPackage),
+            title: titleSeed,
+          };
+
+      return { document: documentPackage, transcription, metadata };
+    });
+
+    await this.repository.replaceGroupSiblings(groupId, nextRecords);
+    return nextRecords;
   }
 
   async saveTranscriptionEdit(documentId: string, diplomaticText: string) {

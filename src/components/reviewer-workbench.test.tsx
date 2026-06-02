@@ -1,13 +1,28 @@
 // @vitest-environment jsdom
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { ReviewerWorkbench } from "./reviewer-workbench";
 import {
   sampleDocuments,
   sampleMetadata,
   sampleTranscription,
 } from "@/lib/edison/sample-data";
+
+// The workbench calls `useRouter()` to refresh after split edits. The test
+// environment doesn't mount an app-router context, so we stub the hook to a
+// no-op router. The mock is hoisted so it applies before the component is
+// imported.
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({
+    refresh: vi.fn(),
+    push: vi.fn(),
+    replace: vi.fn(),
+    back: vi.fn(),
+    forward: vi.fn(),
+    prefetch: vi.fn(),
+  }),
+}));
 
 const transcriptionsById = {
   [sampleTranscription.documentId]: sampleTranscription,

@@ -1104,47 +1104,39 @@ function PageRender({ page }: { page: PageImage }) {
       />
     );
   }
-  return <FacsimileSheet page={page} />;
+  return <MissingSourcePlaceholder page={page} />;
 }
 
-function FacsimileSheet({ page }: { page: PageImage }) {
+function MissingSourcePlaceholder({ page }: { page: PageImage }) {
+  const hasError = Boolean(page.renderError);
+  const headline = hasError
+    ? "Source image failed to render"
+    : "Source image not available";
+  const detail =
+    page.renderError ??
+    "The page was rasterized but no rendered image is attached. Re-run the upload to generate page images.";
+
   return (
     <article
       role="img"
-      aria-label={`Page ${page.sourcePage} facsimile (source image not yet attached)`}
-      className="relative w-[min(560px,82vw)] rounded-md border border-[oklch(0.85_0.02_85)] bg-[linear-gradient(180deg,oklch(0.985_0.015_85)_0%,oklch(0.96_0.025_80)_100%)] p-10 text-[oklch(0.28_0.02_70)] shadow-[0_1px_0_rgba(255,255,255,0.6)_inset,0_20px_60px_-30px_rgba(0,0,0,0.55)]"
+      aria-label={`Page ${page.sourcePage} source image unavailable`}
+      className="relative w-[min(520px,82vw)] rounded-md border border-dashed border-white/15 bg-white/[0.04] p-8 text-white/85"
     >
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute inset-x-10 top-7 h-[1px] bg-[oklch(0.78_0.04_75)]/60"
-      />
-      <header className="mb-6 flex items-center justify-between text-[10px] uppercase tracking-wide text-[oklch(0.45_0.04_70)]">
-        <span>Edison Papers Facsimile</span>
+      <header className="flex items-center justify-between text-[10px] font-semibold uppercase tracking-wide text-white/55">
+        <span>Source page</span>
         <span className="font-mono">Page {page.sourcePage}</span>
       </header>
-      <div className="space-y-3 text-[15px] leading-7">
-        <p>
-          <span className="font-semibold">Letterhead:</span> Edison Electric Light
-          Co. of Philadelphia
-        </p>
-        <p>
-          <span className="font-semibold">Dateline:</span> Philadelphia, Jan. 12,
-          1890
-        </p>
-        <p>
-          Body: Mr. Marks reports on the{" "}
-          <span className="rounded-sm bg-amber-200/60 px-1 underline decoration-amber-700/60 decoration-2 underline-offset-[5px]">
-            [filament?]
-          </span>{" "}
-          tests and station materials.
-        </p>
-        <p>
-          <span className="font-semibold">Signature:</span> W. D. Marks
-        </p>
+      <div className="mt-6 flex flex-col items-center gap-3 text-center">
+        <ImageIcon
+          aria-hidden="true"
+          strokeWidth={1.4}
+          className="h-9 w-9 text-white/40"
+        />
+        <p className="text-[15px] font-semibold text-white">{headline}</p>
+        <p className="text-[12px] leading-relaxed text-white/65">{detail}</p>
       </div>
-      <footer className="mt-10 flex items-center justify-between text-[10px] uppercase tracking-wide text-[oklch(0.5_0.04_70)]">
-        <span className="font-mono">{page.imageFilename}</span>
-        <span>Source image not yet attached</span>
+      <footer className="mt-8 border-t border-white/10 pt-3 text-center font-mono text-[10px] text-white/45">
+        {page.imageFilename}
       </footer>
     </article>
   );

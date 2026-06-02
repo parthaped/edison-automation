@@ -1,4 +1,4 @@
-import { list, put } from "@vercel/blob";
+import { del, list, put } from "@vercel/blob";
 import { extractUncertainReadings, gradeTranscription } from "./confidence";
 import type {
   DocumentRecord,
@@ -258,5 +258,45 @@ export class BlobEdisonRepository implements EdisonRepository {
       });
     }
     return rows;
+  }
+
+  async listGroupSiblings(groupId: string): Promise<DocumentRecord[]> {
+    const records = await this.readAllRecords();
+    return records
+      .filter((record) => record.document.sourceGroup?.groupId === groupId)
+      .sort(
+        (a, b) =>
+          (a.document.sourceGroup?.position ?? 0) -
+          (b.document.sourceGroup?.position ?? 0),
+      );
+  }
+
+  async replaceGroupSiblings(
+    groupId: string,
+    nextSiblings: DocumentRecord[],
+  ): Promise<void> {
+    const existing = await this.listGroupSiblings(groupId);
+    const keepIds = new Set(
+      nextSiblings.map((record) => record.document.documentId),
+    );
+    // Delete blob records for siblings that no longer belong to the group.
+    // We resolve each obsolete record to its current blob URL via `list` and
+    // call `del` on it; if the blob is already missing we silently move on.
+    for (const obsolete of existing) {
+      if (keepIds.has(obsolete.document.documentId)) continue;
+      const path = recordPath(obsolete.document.documentId);
+      const { blobs } = await list({ prefix: path, limit: 1 });
+      const match = blobs.find((blob) => blob.pathname === path);
+      if (match) {
+        try {
+          await del(match.url);
+        } catch {
+          // Best-effort cleanup; a leaked record can be removed manually.
+        }
+      }
+    }
+    for (const record of nextSiblings) {
+      await this.writeRecord(record);
+    }
   }
 }

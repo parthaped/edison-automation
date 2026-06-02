@@ -65,6 +65,11 @@ export function FilePipelineTracker({ job }: FilePipelineTrackerProps) {
                 {file.errorMessage}
               </p>
             ) : null}
+            {file.warningMessage ? (
+              <p className="mt-1.5 text-[12px] text-amber-700 dark:text-amber-400">
+                {file.warningMessage}
+              </p>
+            ) : null}
           </li>
         ))}
       </ul>
