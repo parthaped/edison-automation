@@ -15,8 +15,9 @@ import {
 import { StageTimer, type FileStageTimingMs } from "../ingest-timing";
 import type { BatchEvent } from "../ingest-job-store";
 import {
-  extractDocumentMetadataFromSample,
+  analyzeChunkedDocumentStructure,
   mergePageChunkResults,
+  type ChunkedSubDocumentPlan,
   transcribePageChunk,
   type TranscribePageChunkResult,
 } from "../page-chunk-transcribe";
@@ -451,7 +452,7 @@ async function transcribePreparedFile(
         offset += PAGE_CHUNK_CONCURRENCY
       ) {
         const batch = ranges.slice(offset, offset + PAGE_CHUNK_CONCURRENCY);
-        const settled = await Promise.all(
+        const settled = await Promise.allSettled(
           batch.map((range) =>
             transcribePageChunkStep({
               fileName: blob.name,
@@ -469,35 +470,48 @@ async function transcribePreparedFile(
             }),
           ),
         );
-        chunkResults.push(...settled);
+        for (const [index, outcome] of settled.entries()) {
+          if (outcome.status === "fulfilled") {
+            chunkResults.push(outcome.value);
+          } else {
+            const range = batch[index];
+            const message =
+              outcome.reason instanceof Error
+                ? outcome.reason.message
+                : String(outcome.reason);
+            errors.push({
+              fileName: blob.name,
+              stage: "transcription",
+              message: `Pages ${range.startPage}-${range.endPage} failed: ${message}`,
+            });
+          }
+        }
       }
 
-      const sampleUrl = pageImageUrls[0]?.url;
-      const metadata =
-        sampleUrl !== undefined
-          ? await extractMetadataStep({
-              fileName: blob.name,
-              samplePageUrl: sampleUrl,
-              mergedTextExcerpt: chunkResults
-                .flatMap((chunk) => chunk.pages.map((p) => p.text))
-                .join("\n\n"),
-              totalPages: pageCount,
-            })
-          : {
-              title: "",
-              documentType: "",
-              date: "",
-              authors: [],
-              recipients: [],
-              mentionedNames: [],
-              subjects: [],
-              places: [],
-            };
+      if (chunkResults.length === 0) {
+        return {
+          subDocuments: [],
+          errors,
+          transcribeMs: Date.now() - transcribeStarted,
+          transcribeChunkCount: ranges.length,
+        };
+      }
+
+      const orderedPages = chunkResults
+        .flatMap((chunk) => chunk.pages)
+        .sort((a, b) => a.pageNumber - b.pageNumber);
+      const subDocumentPlans = await analyzeChunkedDocumentStructureStep({
+        fileName: blob.name,
+        promptTask,
+        pages: orderedPages,
+        totalPages: pageCount,
+      });
 
       const merged = mergePageChunkResults(
         chunkResults,
         pageCount,
-        metadata,
+        emptyTranscribedMetadata(),
+        subDocumentPlans,
       );
 
       const transcribeMs = Date.now() - transcribeStarted;
@@ -595,36 +609,27 @@ async function transcribePageChunkStep(input: {
   }
 }
 
-async function extractMetadataStep(input: {
+async function analyzeChunkedDocumentStructureStep(input: {
   fileName: string;
-  samplePageUrl: string;
-  mergedTextExcerpt: string;
+  promptTask: "diplomatic-transcription" | "project-notebook";
+  pages: Array<{ pageNumber: number; text: string }>;
   totalPages: number;
-}) {
+}): Promise<ChunkedSubDocumentPlan[]> {
   "use step";
 
   try {
-    return await extractDocumentMetadataFromSample({
-      samplePageUrl: input.samplePageUrl,
-      mergedTextExcerpt: input.mergedTextExcerpt,
+    return await analyzeChunkedDocumentStructure({
+      promptTask: input.promptTask,
+      pages: input.pages,
       totalPages: input.totalPages,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    console.warn("[batch-ingest] metadata:failed", {
+    console.warn("[batch-ingest] chunked-split:failed", {
       fileName: input.fileName,
       message,
     });
-    return {
-      title: "",
-      documentType: "",
-      date: "",
-      authors: [] as string[],
-      recipients: [] as string[],
-      mentionedNames: [] as string[],
-      subjects: [] as string[],
-      places: [] as string[],
-    };
+    return [];
   }
 }
 
@@ -844,6 +849,19 @@ function buildResult(results: FileResult[]): ManualIngestResult {
     transcriptions: results.flatMap((entry) => entry.transcriptions),
     metadata: results.flatMap((entry) => entry.metadata),
     transcriptionErrors: results.flatMap((entry) => entry.errors),
+  };
+}
+
+function emptyTranscribedMetadata(): TranscribedSubDocument["metadata"] {
+  return {
+    title: "",
+    documentType: "",
+    date: "",
+    authors: [],
+    recipients: [],
+    mentionedNames: [],
+    subjects: [],
+    places: [],
   };
 }
 

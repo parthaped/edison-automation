@@ -15,11 +15,6 @@ export const maxDuration = 30;
 // file batch only emits a few hundred events.
 const MAX_EVENTS_PER_POLL = 4096;
 
-// How long we will wait for the next chunk before bailing on this poll and
-// returning the snapshot we have so far. The stream is replayed from the
-// beginning every poll so this just bounds the worst case.
-const READ_CHUNK_TIMEOUT_MS = 1500;
-
 export async function GET(
   _request: Request,
   context: { params: Promise<{ batchId: string }> },
@@ -95,11 +90,7 @@ async function readBatchEvents(
   const events: BatchEvent[] = [];
   try {
     while (events.length < targetCount) {
-      const result = await Promise.race([
-        reader.read(),
-        timeoutResolver(READ_CHUNK_TIMEOUT_MS),
-      ]);
-      if (result === "timeout") break;
+      const result = await reader.read();
       const { done, value } = result;
       if (done) break;
       if (value !== undefined) events.push(value);
@@ -109,8 +100,4 @@ async function readBatchEvents(
     reader.releaseLock();
   }
   return events;
-}
-
-function timeoutResolver(ms: number): Promise<"timeout"> {
-  return new Promise((resolve) => setTimeout(() => resolve("timeout"), ms));
 }

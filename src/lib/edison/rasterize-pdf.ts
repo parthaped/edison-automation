@@ -4,8 +4,9 @@
 // it dynamically requires "@napi-rs/canvas" and uses a `NodeCanvasFactory` for
 // rendering. We import "@napi-rs/canvas" directly to allocate the canvas
 // ourselves so we can encode the rendered surface to JPEG without going
-// through any DOM API. Both packages are listed in `serverExternalPackages`
-// in next.config.ts so the bundler doesn't try to inline the native binding.
+// through any DOM API. The native canvas package is listed in
+// `serverExternalPackages` so the bundler doesn't try to inline its binding;
+// pdfjs-dist stays bundled because its worker files are ESM.
 //
 // In serverless deployments the worker script is not traced unless we import it
 // from application code. pdfjs falls back to a dynamic import of

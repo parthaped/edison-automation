@@ -40,6 +40,37 @@ const metadataOnlySchema = z.object({
   comments: z.string(),
 });
 
+const chunkedSubDocumentSchema = z.object({
+  startPage: z
+    .number()
+    .int()
+    .min(1)
+    .describe("1-based page where this distinct document starts."),
+  endPage: z
+    .number()
+    .int()
+    .min(1)
+    .describe("1-based page where this distinct document ends, inclusive."),
+  title: z.string(),
+  documentType: z.string(),
+  date: z.string(),
+  authors: z.array(z.string()),
+  recipients: z.array(z.string()),
+  mentionedNames: z.array(z.string()),
+  subjects: z.array(z.string()),
+  places: z.array(z.string()),
+  comments: z.string(),
+});
+
+const chunkedStructureSchema = z.object({
+  subDocuments: z
+    .array(chunkedSubDocumentSchema)
+    .min(1)
+    .describe(
+      "One entry per distinct document in source-page order. Ranges must be contiguous and cover every page.",
+    ),
+});
+
 export interface PageImageRef {
   pageNumber: number;
   url: string;
@@ -60,8 +91,17 @@ export interface TranscribePageChunkResult {
   outputTokens?: number;
 }
 
+export interface ChunkedSubDocumentPlan {
+  startPage: number;
+  endPage: number;
+  metadata: TranscribedMetadata;
+}
+
 const PAGE_CHUNK_INSTRUCTION =
   "Transcribe ONLY the page images provided in this request. Return one entry per page with the correct pageNumber. Do not infer content from pages you cannot see.";
+
+const CHUNKED_SPLIT_INSTRUCTION =
+  "You are given OCR text for every page of a source PDF. Decide whether the source contains ONE document or MULTIPLE separate documents stitched together. Boundary signals include new letterhead, new dateline, new salutation/closing pair, explicit end markers, blank separator pages, or obvious changes in subject/format. Return contiguous, non-overlapping page ranges that cover every page. If uncertain, prefer fewer splits.";
 
 export async function fetchImageBytes(url: string): Promise<Uint8Array> {
   const response = await fetch(url);
@@ -171,10 +211,61 @@ export async function extractDocumentMetadataFromSample(input: {
   };
 }
 
+export async function analyzeChunkedDocumentStructure(input: {
+  pages: Array<{ pageNumber: number; text: string }>;
+  totalPages: number;
+  promptTask?: TranscriptionPromptTask;
+  model?: string;
+  signal?: AbortSignal;
+}): Promise<ChunkedSubDocumentPlan[]> {
+  const model = input.model ?? getDefaultOcrModel();
+  const activePrompt = getActivePrompt(
+    input.promptTask ?? "diplomatic-transcription",
+  );
+  const pageText = input.pages
+    .map((page) => {
+      const text = page.text.trim() || "[No legible text returned for this page]";
+      return `--- PAGE ${page.pageNumber} ---\n${text.slice(0, 5000)}`;
+    })
+    .join("\n\n");
+
+  const result = await generateText({
+    model,
+    abortSignal: input.signal,
+    output: Output.object({ schema: chunkedStructureSchema }),
+    messages: [
+      {
+        role: "user",
+        content: `${activePrompt.prompt}\n\n${CHUNKED_SPLIT_INSTRUCTION}\n\nFor EACH returned sub-document, also index it for the TAEP Omeka-S catalog. Leave fields empty rather than guessing.\n\nTotal pages: ${input.totalPages}\n\n${pageText}`,
+      },
+    ],
+  });
+
+  return (result.output.subDocuments ?? [])
+    .slice()
+    .sort((a, b) => a.startPage - b.startPage)
+    .map((entry) => ({
+      startPage: entry.startPage,
+      endPage: Math.max(entry.startPage, entry.endPage),
+      metadata: {
+        title: entry.title?.trim() || "",
+        documentType: entry.documentType?.trim() || "",
+        date: entry.date?.trim() || "",
+        authors: entry.authors ?? [],
+        recipients: entry.recipients ?? [],
+        mentionedNames: entry.mentionedNames ?? [],
+        subjects: entry.subjects ?? [],
+        places: entry.places ?? [],
+        comments: entry.comments?.trim() || undefined,
+      },
+    }));
+}
+
 export function mergePageChunkResults(
   chunkResults: TranscribePageChunkResult[],
   totalPages: number,
   metadata: TranscribedMetadata,
+  subDocumentPlans?: ChunkedSubDocumentPlan[],
 ): TranscribeDocumentResult {
   const textByPage = new Map<number, string>();
   for (const chunk of chunkResults) {
@@ -197,15 +288,32 @@ export function mergePageChunkResults(
     .join("\n\n");
   const uncertainReadings = ocrText.match(/\[[^\]]+\?\]/g) ?? [];
 
-  const subDocuments: SubDocumentResult[] = [
-    {
-      startPage: 1,
-      endPage: totalPages,
-      ocrText,
-      uncertainReadings,
-      metadata,
-    },
-  ];
+  const plans = normalizeChunkedPlans(
+    subDocumentPlans && subDocumentPlans.length > 0
+      ? subDocumentPlans
+      : [{ startPage: 1, endPage: totalPages, metadata }],
+    totalPages,
+    metadata,
+  );
+
+  const subDocuments: SubDocumentResult[] = plans.map((plan) => {
+    const startPage = Math.max(1, Math.min(plan.startPage, totalPages));
+    const endPage = Math.max(startPage, Math.min(plan.endPage, totalPages));
+    const documentText = orderedPages
+      .filter(
+        (page) => page.pageNumber >= startPage && page.pageNumber <= endPage,
+      )
+      .map((page) => page.text)
+      .filter(Boolean)
+      .join("\n\n");
+    return {
+      startPage,
+      endPage,
+      ocrText: documentText,
+      uncertainReadings: documentText.match(/\[[^\]]+\?\]/g) ?? [],
+      metadata: plan.metadata,
+    };
+  });
 
   const model = chunkResults[0]?.model ?? getDefaultOcrModel();
   const promptVersion = chunkResults[0]?.promptVersion ?? "unknown";
@@ -228,4 +336,42 @@ export function mergePageChunkResults(
     metadata: ocrText.length > 0 ? metadata : undefined,
     subDocuments,
   };
+}
+
+function normalizeChunkedPlans(
+  plans: ChunkedSubDocumentPlan[],
+  totalPages: number,
+  fallbackMetadata: TranscribedMetadata,
+): ChunkedSubDocumentPlan[] {
+  const sorted = plans
+    .map((plan) => ({
+      ...plan,
+      startPage: Math.max(1, Math.min(plan.startPage, totalPages)),
+      endPage: Math.max(1, Math.min(plan.endPage, totalPages)),
+    }))
+    .filter((plan) => plan.endPage >= plan.startPage)
+    .sort((a, b) => a.startPage - b.startPage);
+
+  const normalized: ChunkedSubDocumentPlan[] = [];
+  let cursor = 0;
+  for (const plan of sorted) {
+    if (plan.endPage <= cursor) continue;
+    normalized.push({
+      ...plan,
+      startPage: cursor + 1,
+      endPage: plan.endPage,
+    });
+    cursor = plan.endPage;
+  }
+
+  if (normalized.length === 0) {
+    return [{ startPage: 1, endPage: totalPages, metadata: fallbackMetadata }];
+  }
+
+  if (cursor < totalPages) {
+    const last = normalized[normalized.length - 1];
+    normalized[normalized.length - 1] = { ...last, endPage: totalPages };
+  }
+
+  return normalized;
 }
