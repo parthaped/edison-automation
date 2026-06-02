@@ -189,11 +189,6 @@ function SectionTextarea({
       data-block-id={blockDomId(pageIndex, blockIndex)}
       className={cn("rounded-sm border border-transparent px-2 py-1.5 focus-within:border-border", layoutClass)}
     >
-      {label ? (
-        <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-          {label}
-        </p>
-      ) : null}
       <textarea
         value={block.content}
         onChange={(e) => onContentChange(e.target.value)}
