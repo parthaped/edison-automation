@@ -878,6 +878,8 @@ function isTransientError(error: unknown): boolean {
 }
 
 async function emitEvent(event: BatchEvent): Promise<void> {
+  "use step";
+
   const writer = getWritable<BatchEvent>().getWriter();
   try {
     await writer.write(event);
