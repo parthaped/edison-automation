@@ -38,7 +38,9 @@ describe("export csv", () => {
     ]);
 
     expect(csv).toContain('"Marks, William D."');
-    expect(csv).toContain('"Letterhead: Edison Electric Light Co. of Philadelphia');
+    expect(csv).toContain('"## D9032-00001/d9032-00001_0001.jpg');
+    expect(csv).toContain("Letterhead:");
+    expect(csv).toContain("Edison Electric Light Co. of Philadelphia");
   });
 
   it("emits the canonical Omeka header row followed by data rows with LF terminators", () => {

@@ -1,4 +1,5 @@
 import type { ManualIngestResult } from "./service";
+import type { FileStageTimingMs } from "./ingest-timing";
 
 export type FileStage =
   | "queued"
@@ -24,6 +25,8 @@ export interface FileSnapshot {
   // transcription still succeeded). Surfaced in the upload tracker without
   // marking the file failed.
   warningMessage?: string;
+  /** Per-stage durations in milliseconds after the file completes. */
+  stageTimingMs?: FileStageTimingMs;
 }
 
 export interface IngestJobSnapshot {
@@ -64,6 +67,7 @@ export interface FileCompletedPayload {
   fileName: string;
   documentId: string;
   at: string;
+  stageTimingMs?: FileStageTimingMs;
 }
 
 export interface FileFailedPayload {
@@ -193,6 +197,7 @@ export function applyBatchEvent(
           stage: "done",
           documentId: event.documentId,
           finishedAt: event.at,
+          stageTimingMs: event.stageTimingMs,
         })),
       };
 

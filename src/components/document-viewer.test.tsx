@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { DocumentViewer } from "./document-viewer";
@@ -72,22 +72,22 @@ describe("DocumentViewer", () => {
     ).toBeInTheDocument();
   });
 
-  it("selects an uncertain reading in the textarea when its chip is clicked", async () => {
+  it("focuses an uncertain reading in the formatted editor when its chip is clicked", async () => {
     const user = userEvent.setup();
     renderViewer();
 
-    const textarea = screen.getByLabelText(
-      "Diplomatic transcription",
-    ) as HTMLTextAreaElement;
     const token = "[filament?]";
-    const expectedIndex = textarea.value.indexOf(token);
-    expect(expectedIndex).toBeGreaterThanOrEqual(0);
+    const bodyField = screen.getByLabelText("Body text") as HTMLTextAreaElement;
+    expect(bodyField.value).toContain(token);
 
     await user.click(screen.getByRole("button", { name: token }));
 
-    expect(document.activeElement).toBe(textarea);
-    expect(textarea.selectionStart).toBe(expectedIndex);
-    expect(textarea.selectionEnd).toBe(expectedIndex + token.length);
+    await waitFor(() => {
+      expect(document.activeElement).toBe(bodyField);
+    });
+    const start = bodyField.selectionStart ?? 0;
+    const end = bodyField.selectionEnd ?? 0;
+    expect(bodyField.value.slice(start, end)).toBe(token);
   });
 
   it("shows the empty stage when a document has no extracted pages", () => {

@@ -3,6 +3,7 @@ import { extractUncertainReadings, gradeTranscription } from "./confidence";
 import type {
   DocumentRecord,
   DocumentRecords,
+  DocumentRecordsPage,
   EdisonRepository,
   ReviewCase,
 } from "./repositories";
@@ -70,18 +71,7 @@ export class BlobEdisonRepository implements EdisonRepository {
 
   private async readAllRecords(): Promise<DocumentRecord[]> {
     const blobs = await listAllRecordBlobs();
-    const records = await Promise.all(
-      blobs.map(async (blob) => {
-        try {
-          const response = await fetch(blob.url, { cache: "no-store" });
-          if (!response.ok) return null;
-          return (await response.json()) as DocumentRecord;
-        } catch {
-          return null;
-        }
-      }),
-    );
-    return records.filter((record): record is DocumentRecord => record !== null);
+    return this.fetchRecordsForBlobs(blobs);
   }
 
   private async readRecord(documentId: string): Promise<DocumentRecord | null> {
@@ -120,6 +110,35 @@ export class BlobEdisonRepository implements EdisonRepository {
 
   async listDocumentRecords(): Promise<DocumentRecords> {
     const records = await this.readAllRecords();
+    return this.recordsToDocumentRecords(records);
+  }
+
+  async listDocumentRecordsPage(input: {
+    offset: number;
+    limit: number;
+  }): Promise<DocumentRecordsPage> {
+    const blobs = await listAllRecordBlobs();
+    blobs.sort(
+      (a, b) => b.uploadedAt.getTime() - a.uploadedAt.getTime(),
+    );
+    const totalCount = blobs.length;
+    const offset = Math.max(0, input.offset);
+    const limit = Math.max(1, input.limit);
+    const slice = blobs.slice(offset, offset + limit);
+    const records = await this.fetchRecordsForBlobs(slice);
+    const page = this.recordsToDocumentRecords(records);
+    return {
+      ...page,
+      totalCount,
+      offset,
+      limit,
+      hasMore: offset + limit < totalCount,
+    };
+  }
+
+  private recordsToDocumentRecords(
+    records: DocumentRecord[],
+  ): DocumentRecords {
     const documents = records
       .map((record) => record.document)
       .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
@@ -130,6 +149,23 @@ export class BlobEdisonRepository implements EdisonRepository {
       metadata[record.document.documentId] = record.metadata;
     }
     return { documents, transcriptions, metadata };
+  }
+
+  private async fetchRecordsForBlobs(
+    blobs: Awaited<ReturnType<typeof listAllRecordBlobs>>,
+  ): Promise<DocumentRecord[]> {
+    const records = await Promise.all(
+      blobs.map(async (blob) => {
+        try {
+          const response = await fetch(blob.url, { cache: "no-store" });
+          if (!response.ok) return null;
+          return (await response.json()) as DocumentRecord;
+        } catch {
+          return null;
+        }
+      }),
+    );
+    return records.filter((record): record is DocumentRecord => record !== null);
   }
 
   async saveDocuments(documents: DocumentPackage[]): Promise<void> {

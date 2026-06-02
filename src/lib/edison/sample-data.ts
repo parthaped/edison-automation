@@ -97,11 +97,11 @@ export const sampleTranscription: TranscriptionRun = {
   id: "D9032-00001-run-1",
   documentId: "D9032-00001",
   model: "gateway-configured-model",
-  promptVersion: "1.0.0",
+  promptVersion: "3.0.0",
   ocrText:
-    "Letterhead: Edison Electric Light Co. of Philadelphia\nDateline: Philadelphia, Jan. 12, 1890\nBody: Mr. Marks reports on the [filament?] tests and station materials.\nSignature: W. D. Marks",
+    "## D9032-00001/d9032-00001_0001.jpg\n\nLetterhead:\nEdison Electric Light Co. of Philadelphia\n\nDateline:\nPhiladelphia, Jan. 12, 1890\n\nBody:\nMr. Marks reports on the [filament?] tests and station materials.\n\nSignature:\nW. D. Marks",
   diplomaticText:
-    "Letterhead: Edison Electric Light Co. of Philadelphia\n\nDateline: Philadelphia, Jan. 12, 1890\n\nBody: Mr. Marks reports on the [filament?] tests and station materials.\n\nSignature: W. D. Marks",
+    "## D9032-00001/d9032-00001_0001.jpg\n\nLetterhead:\nEdison Electric Light Co. of Philadelphia\n\nDateline:\nPhiladelphia, Jan. 12, 1890\n\nBody:\nMr. Marks reports on the [filament?] tests and station materials.\n\nSignature:\nW. D. Marks",
   uncertainReadings: ["[filament?]"],
   costUsd: 0.012,
   inputTokens: 1420,

@@ -24,11 +24,11 @@ import { motion, type Transition } from "motion/react";
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type CSSProperties,
   type FormEvent,
-  type KeyboardEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import { toast } from "sonner";
@@ -40,6 +40,11 @@ const motionSpring: Transition = {
   damping: 28,
   mass: 0.6,
 };
+import {
+  TranscriptionFormattedEditor,
+  type TranscriptionFormattedEditorHandle,
+} from "@/components/transcription-formatted-editor";
+import { findPageIndexByHeading, parseTranscriptionDocument } from "@/lib/edison/transcription-document";
 import { cn } from "@/lib/utils";
 import type { DocumentPackage, PageImage, TranscriptionRun } from "@/lib/edison/types";
 
@@ -96,7 +101,7 @@ export function DocumentViewer({
   const dragRef = useRef<{ startX: number; startY: number; panX: number; panY: number } | null>(
     null,
   );
-  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const transcriptionEditorRef = useRef<TranscriptionFormattedEditorHandle | null>(null);
 
   if (lastTranscriptionId !== transcription.id) {
     setLastTranscriptionId(transcription.id);
@@ -121,19 +126,17 @@ export function DocumentViewer({
     setPan({ x: 0, y: 0 });
   }
 
-  useEffect(() => {
-    if (!textareaRef.current || pageCount <= 1) {
-      return;
-    }
-    const ta = textareaRef.current;
-    const ratio = activePage / Math.max(1, pageCount - 1);
-    const targetTop = ratio * Math.max(0, ta.scrollHeight - ta.clientHeight);
-    if (typeof ta.scrollTo === "function") {
-      ta.scrollTo({ top: targetTop, behavior: "smooth" });
-    } else {
-      ta.scrollTop = targetTop;
-    }
-  }, [activePage, pageCount, editedText.length]);
+  const transcriptionDoc = useMemo(
+    () => parseTranscriptionDocument(editedText),
+    [editedText],
+  );
+
+  const transcriptionScrollPageIndex = useMemo(() => {
+    const page = pages[activePage];
+    if (!page?.imageFilename) return activePage;
+    const idx = findPageIndexByHeading(transcriptionDoc, page.imageFilename);
+    return idx >= 0 ? idx : activePage;
+  }, [activePage, pages, transcriptionDoc]);
 
   // Settings are inapplicable in grid mode (no zoom/rotate). Derive the
   // effective open-state during render instead of clearing it via an effect,
@@ -254,8 +257,8 @@ export function DocumentViewer({
     }
   }
 
-  function handleTextareaChange(event: React.ChangeEvent<HTMLTextAreaElement>) {
-    setEditedText(event.target.value);
+  function handleEditedTextChange(next: string) {
+    setEditedText(next);
   }
 
   const dirty = editedText !== savedText;
@@ -290,22 +293,13 @@ export function DocumentViewer({
   }
 
   function selectUncertain(token: string) {
-    const ta = textareaRef.current;
-    if (!ta) return;
-    const idx = editedText.indexOf(token);
-    if (idx < 0) {
+    if (editedText.indexOf(token) < 0) {
       toast.info("Reading no longer present in transcription.");
       return;
     }
-    ta.focus();
-    ta.setSelectionRange(idx, idx + token.length);
-    const lineHeight = 24;
-    const approxLine = (editedText.slice(0, idx).match(/\n/g) ?? []).length;
-    const targetTop = Math.max(0, approxLine * lineHeight - 64);
-    if (typeof ta.scrollTo === "function") {
-      ta.scrollTo({ top: targetTop, behavior: "smooth" });
-    } else {
-      ta.scrollTop = targetTop;
+    const focused = transcriptionEditorRef.current?.focusUncertain(token);
+    if (!focused) {
+      toast.info("Could not locate reading in transcription.");
     }
   }
 
@@ -429,12 +423,13 @@ export function DocumentViewer({
 
         {rightOpen ? (
           <TranscriptionPane
-            textareaRef={textareaRef}
+            editorRef={transcriptionEditorRef}
             editedText={editedText}
             characterCount={characterCount}
             transcription={transcription}
             uncertain={uncertain}
-            onChange={handleTextareaChange}
+            transcriptionScrollPageIndex={transcriptionScrollPageIndex}
+            onChange={handleEditedTextChange}
             onSelectUncertain={selectUncertain}
             onClose={() => setRightOpen(false)}
             onSave={handleSave}
@@ -1243,12 +1238,13 @@ function EmptyStage() {
 }
 
 interface TranscriptionPaneProps {
-  textareaRef: React.RefObject<HTMLTextAreaElement | null>;
+  editorRef: React.RefObject<TranscriptionFormattedEditorHandle | null>;
   editedText: string;
   characterCount: number;
   transcription: TranscriptionRun;
   uncertain: string[];
-  onChange: (event: React.ChangeEvent<HTMLTextAreaElement>) => void;
+  transcriptionScrollPageIndex: number;
+  onChange: (value: string) => void;
   onSelectUncertain: (token: string) => void;
   onClose: () => void;
   onSave: () => void;
@@ -1257,11 +1253,12 @@ interface TranscriptionPaneProps {
 }
 
 function TranscriptionPane({
-  textareaRef,
+  editorRef,
   editedText,
   characterCount,
   transcription,
   uncertain,
+  transcriptionScrollPageIndex,
   onChange,
   onSelectUncertain,
   onClose,
@@ -1269,12 +1266,6 @@ function TranscriptionPane({
   saving,
   dirty,
 }: TranscriptionPaneProps) {
-  function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
-    if ((event.metaKey || event.ctrlKey) && event.key === "s") {
-      event.preventDefault();
-      onSave();
-    }
-  }
   return (
     <aside
       aria-label="Transcription editor"
@@ -1285,12 +1276,9 @@ function TranscriptionPane({
           <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
             More information
           </p>
-          <label
-            htmlFor="transcription"
-            className="mt-0.5 block truncate text-[15px] font-semibold text-foreground"
-          >
+          <p className="mt-0.5 block truncate text-[15px] font-semibold text-foreground">
             Diplomatic transcription
-          </label>
+          </p>
           <p className="mt-0.5 text-[12px] text-muted-foreground">
             Preserve original spelling, abbreviations, punctuation, annotations,
             and uncertainty marks.
@@ -1329,15 +1317,21 @@ function TranscriptionPane({
         </div>
       ) : null}
 
-      <div className="relative min-h-0 flex-1 px-4 py-3">
-        <textarea
-          ref={textareaRef}
-          id="transcription"
+      <div
+        className="relative min-h-0 flex-1 px-4 py-3"
+        onKeyDownCapture={(event) => {
+          if ((event.metaKey || event.ctrlKey) && event.key === "s") {
+            event.preventDefault();
+            onSave();
+          }
+        }}
+      >
+        <TranscriptionFormattedEditor
+          ref={editorRef}
           value={editedText}
           onChange={onChange}
-          onKeyDown={handleKeyDown}
-          spellCheck={false}
-          className="block h-full min-h-[160px] w-full resize-none rounded-sm border border-border bg-card px-3 py-3 font-mono text-[13px] leading-6 text-foreground transition-shadow placeholder:text-muted-foreground/70 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
+          activePageIndex={transcriptionScrollPageIndex}
+          className="h-full"
         />
       </div>
 

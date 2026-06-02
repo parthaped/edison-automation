@@ -10,13 +10,24 @@ export const metadata: Metadata = {
 };
 
 interface ReviewPageProps {
-  searchParams: Promise<{ doc?: string }>;
+  searchParams: Promise<{ doc?: string; offset?: string }>;
 }
 
 export default async function ReviewPage({ searchParams }: ReviewPageProps) {
-  const { doc } = await searchParams;
+  const { doc, offset: offsetParam } = await searchParams;
+  const requestedOffset = Math.max(0, Number(offsetParam) || 0);
   const service = getEdisonService();
-  const { summary, reviewCase } = await service.getReviewWorkbench(doc);
+  const {
+    summary,
+    reviewCase,
+    totalDocuments,
+    hasMoreReviewDocuments,
+    reviewOffset,
+    reviewLimit,
+  } = await service.getReviewWorkbench(doc, {
+    offset: requestedOffset,
+    limit: 50,
+  });
 
   return (
     <>
@@ -28,6 +39,15 @@ export default async function ReviewPage({ searchParams }: ReviewPageProps) {
       <main className="flex flex-1 flex-col overflow-y-auto">
         {reviewCase ? (
           <div className="p-4 sm:p-6">
+            {totalDocuments > reviewLimit ? (
+              <ReviewPagination
+                doc={doc}
+                offset={reviewOffset}
+                limit={reviewLimit}
+                total={totalDocuments}
+                hasMore={hasMoreReviewDocuments}
+              />
+            ) : null}
             <ReviewerWorkbench
               key={
                 doc &&
@@ -66,6 +86,65 @@ export default async function ReviewPage({ searchParams }: ReviewPageProps) {
         )}
       </main>
     </>
+  );
+}
+
+function ReviewPagination({
+  doc,
+  offset,
+  limit,
+  total,
+  hasMore,
+}: {
+  doc?: string;
+  offset: number;
+  limit: number;
+  total: number;
+  hasMore: boolean;
+}) {
+  const prevOffset = Math.max(0, offset - limit);
+  const nextOffset = offset + limit;
+  const page = Math.floor(offset / limit) + 1;
+  const pageCount = Math.ceil(total / limit);
+  const docQuery = doc ? `&doc=${encodeURIComponent(doc)}` : "";
+
+  return (
+    <nav
+      aria-label="Review queue pagination"
+      className="mb-4 flex items-center justify-between gap-3 text-sm text-muted-foreground"
+    >
+      <span>
+        Showing {offset + 1}&ndash;{Math.min(offset + limit, total)} of {total}{" "}
+        records
+      </span>
+      <div className="flex items-center gap-2">
+        {offset > 0 ? (
+          <Button
+            variant="outline"
+            size="sm"
+            render={
+              <Link href={`/review?offset=${prevOffset}${docQuery}`} />
+            }
+          >
+            Previous
+          </Button>
+        ) : null}
+        <span className="font-mono text-xs tabular-nums">
+          Page {page} / {pageCount}
+        </span>
+        {hasMore ? (
+          <Button
+            variant="outline"
+            size="sm"
+            render={
+              <Link href={`/review?offset=${nextOffset}${docQuery}`} />
+            }
+          >
+            Next
+          </Button>
+        ) : null}
+      </div>
+    </nav>
   );
 }
 

@@ -4,9 +4,23 @@ import {
   RetryableError,
   getWritable,
 } from "workflow";
+import { createExtractionPlan, type ExtractionPlan } from "../extraction";
 import { assignDocumentId, normalizeFolderId } from "../id-policy";
+import {
+  effectiveFileConcurrency,
+  getPageChunkSize,
+  partitionPageRanges,
+  shouldUsePageChunkedTranscription,
+} from "../ingest-policy";
+import { StageTimer, type FileStageTimingMs } from "../ingest-timing";
 import type { BatchEvent } from "../ingest-job-store";
-import { rasterizePdfPages } from "../rasterize-pdf";
+import {
+  extractDocumentMetadataFromSample,
+  mergePageChunkResults,
+  transcribePageChunk,
+  type TranscribePageChunkResult,
+} from "../page-chunk-transcribe";
+import { rasterizePdfWithProvider } from "../rasterize-provider";
 import {
   processSourceFileSubDocuments,
   type TranscribedSubDocument,
@@ -43,8 +57,6 @@ export interface BatchIngestWorkflowInput {
 
 interface FileResult {
   fileName: string;
-  // First sibling's document ID (or the lone document ID for single-doc files).
-  // Used to surface a primary record in the per-file pipeline tracker.
   primaryDocumentId: string;
   documentPackages: DocumentPackage[];
   transcriptions: TranscriptionRun[];
@@ -57,7 +69,8 @@ interface FileFailure {
   message: string;
 }
 
-const MAX_CONCURRENCY = 3;
+const BASE_MAX_CONCURRENCY = 3;
+const PAGE_CHUNK_CONCURRENCY = 3;
 
 // ---------- workflow ----------
 
@@ -67,17 +80,16 @@ export async function batchIngestWorkflow(
   "use workflow";
 
   const aiEnabled = Boolean(process.env.AI_GATEWAY_API_KEY);
+  const maxConcurrency = effectiveFileConcurrency(
+    input.blobs,
+    BASE_MAX_CONCURRENCY,
+  );
 
   await emitBatchStartedStep({
     folderId: input.folderId,
     files: input.blobs.map((blob) => ({ name: blob.name, size: blob.size })),
   });
 
-  // Assign every document ID up front in a single durable step. Doing this
-  // before the concurrent chunks run guarantees collision-free identifiers even
-  // when two files in the same chunk resolve to the same embedded ID (the
-  // per-file persist steps run concurrently and would otherwise each read the
-  // store before any of them has written).
   const documentIds = await assignIdsStep({
     folderId: input.folderId,
     fileNames: input.blobs.map((blob) => blob.name),
@@ -89,9 +101,9 @@ export async function batchIngestWorkflow(
   for (
     let chunkStart = 0;
     chunkStart < input.blobs.length;
-    chunkStart += MAX_CONCURRENCY
+    chunkStart += maxConcurrency
   ) {
-    const chunk = input.blobs.slice(chunkStart, chunkStart + MAX_CONCURRENCY);
+    const chunk = input.blobs.slice(chunkStart, chunkStart + maxConcurrency);
     const settled = await Promise.allSettled(
       chunk.map((blob, offset) =>
         processOneFile({
@@ -127,19 +139,8 @@ export async function batchIngestWorkflow(
     aggregated,
   });
 
-  // Source blobs are intentionally retained: image pages reference the blob URL
-  // so the side-by-side viewer can render the original document.
   return aggregated;
 }
-
-// ---------- per-file orchestration (not a step) ----------
-//
-// Runs the file's steps sequentially. Each `"use step"` it awaits is its own
-// serverless invocation with its own time budget, so no single invocation runs
-// more than one AI call. This keeps every step comfortably under the Hobby
-// plan's 60s function ceiling. This helper itself must not emit events (the
-// workflow body replays on every step completion, which would duplicate them);
-// all emissions happen inside the steps.
 
 interface ProcessOneFileInput {
   folderId?: string;
@@ -154,11 +155,16 @@ async function processOneFile(input: ProcessOneFileInput): Promise<FileResult> {
   const { folderId, blob, promptTask, batchIndex, documentId, aiEnabled } =
     input;
 
-  const transcribed = await transcribeFileStep({ blob, promptTask, aiEnabled });
+  // Single fetch + rasterize (or image passthrough) before transcription.
+  const prepared = await prepareAndRasterizeStep({ blob, documentId });
 
-  // Rasterize in its own step so it gets its own 60s budget separate from the
-  // OCR call. PDFs become per-page JPGs in Blob; image uploads pass through.
-  const rasterized = await rasterizeFileStep({ blob, documentId });
+  const transcribed = await transcribePreparedFile({
+    blob,
+    promptTask,
+    aiEnabled,
+    pageImageUrls: prepared.urls,
+    extractionPlan: prepared.extractionPlan,
+  });
 
   const persisted = await persistSubDocumentsStep({
     folderId,
@@ -169,8 +175,19 @@ async function processOneFile(input: ProcessOneFileInput): Promise<FileResult> {
     model: transcribed.model,
     inputTokens: transcribed.inputTokens,
     outputTokens: transcribed.outputTokens,
-    pageImageUrls: rasterized.urls,
-    rasterizeError: rasterized.error,
+    pageImageUrls: prepared.urls,
+    rasterizeError: prepared.error,
+    extractionPlan: prepared.extractionPlan,
+    stageTimingMs: {
+      ...prepared.stageTimingMs,
+      transcribeMs: transcribed.transcribeMs,
+      transcribeChunkCount: transcribed.transcribeChunkCount,
+      totalMs:
+        prepared.stageTimingMs.fetchMs +
+        prepared.stageTimingMs.rasterizeMs +
+        transcribed.transcribeMs +
+        0,
+    },
   });
 
   return {
@@ -183,7 +200,511 @@ async function processOneFile(input: ProcessOneFileInput): Promise<FileResult> {
   };
 }
 
-// ---------- steps ----------
+interface PrepareAndRasterizeStepInput {
+  blob: BlobRef;
+  documentId: string;
+}
+
+interface PrepareAndRasterizeStepResult {
+  urls: PageImageUrl[];
+  extractionPlan: ExtractionPlan;
+  error?: string;
+  stageTimingMs: Pick<
+    FileStageTimingMs,
+    "fetchMs" | "rasterizeMs" | "rasterizeBackend"
+  >;
+}
+
+async function prepareAndRasterizeStep(
+  input: PrepareAndRasterizeStepInput,
+): Promise<PrepareAndRasterizeStepResult> {
+  "use step";
+
+  const { blob, documentId } = input;
+  const timer = new StageTimer();
+  timer.mark("fetchStart");
+
+  console.info("[batch-ingest] file:start", { fileName: blob.name });
+
+  await emitEvent({
+    type: "file-stage",
+    fileName: blob.name,
+    stage: "fetching",
+    at: new Date().toISOString(),
+  });
+
+  const contentType = blob.contentType.toLowerCase();
+  const sourceFile: SourceFile = {
+    id: crypto.randomUUID(),
+    name: blob.name,
+    size: blob.size,
+    mimeType: blob.contentType,
+  };
+
+  if (contentType.startsWith("image/")) {
+    const bytes = await fetchBlobBytes(blob);
+    timer.mark("rasterizeStart");
+    timer.mark("rasterizeEnd");
+    const extractionPlan = await createExtractionPlan(sourceFile, bytes);
+    return {
+      urls: [{ pageIndex: 0, url: blob.url }],
+      extractionPlan,
+      stageTimingMs: {
+        fetchMs: timer.elapsedSince("fetchStart"),
+        rasterizeMs: 0,
+        rasterizeBackend: undefined,
+      },
+    };
+  }
+
+  if (contentType !== "application/pdf") {
+    timer.mark("rasterizeStart");
+    timer.mark("rasterizeEnd");
+    return {
+      urls: [],
+      extractionPlan: {
+        kind: "pdf",
+        pageCount: 0,
+        warnings: [],
+        blockedReason: "Unsupported file type.",
+      },
+      stageTimingMs: {
+        fetchMs: timer.elapsedSince("fetchStart"),
+        rasterizeMs: 0,
+      },
+    };
+  }
+
+  const bytes = await fetchBlobBytes(blob);
+  const extractionPlan = await createExtractionPlan(sourceFile, bytes);
+
+  await emitEvent({
+    type: "file-stage",
+    fileName: blob.name,
+    stage: "rasterizing",
+    at: new Date().toISOString(),
+  });
+
+  timer.mark("rasterizeStart");
+
+  try {
+    const { pages, backend } = await rasterizePdfWithProvider(bytes);
+    const uploaded: PageImageUrl[] = [];
+    for (const page of pages) {
+      const pageNumber = page.pageIndex + 1;
+      const padded = String(pageNumber).padStart(4, "0");
+      const result = await put(
+        `page-images/${encodeURIComponent(documentId)}/${padded}.jpg`,
+        Buffer.from(page.jpg.buffer, page.jpg.byteOffset, page.jpg.byteLength),
+        {
+          access: "public",
+          contentType: "image/jpeg",
+          addRandomSuffix: true,
+        },
+      );
+      uploaded.push({
+        pageIndex: page.pageIndex,
+        url: result.url,
+        width: page.width,
+        height: page.height,
+      });
+    }
+    timer.mark("rasterizeEnd");
+    const fetchMs = timer.segmentMs("fetchStart", "rasterizeStart");
+    const rasterizeMs = timer.segmentMs("rasterizeStart", "rasterizeEnd");
+    console.info("[batch-ingest] rasterize:done", {
+      fileName: blob.name,
+      pages: uploaded.length,
+      backend,
+      fetchMs,
+      rasterizeMs,
+    });
+    return {
+      urls: uploaded,
+      extractionPlan,
+      stageTimingMs: {
+        fetchMs,
+        rasterizeMs,
+        rasterizeBackend: backend,
+      },
+    };
+  } catch (error) {
+    timer.mark("rasterizeEnd");
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn("[batch-ingest] rasterize:failed", {
+      fileName: blob.name,
+      message,
+    });
+    const summary = `PDF rasterization failed: ${message}`;
+    await emitEvent({
+      type: "file-warning",
+      fileName: blob.name,
+      message: summary,
+      at: new Date().toISOString(),
+    });
+    return {
+      urls: [],
+      extractionPlan,
+      error: summary,
+      stageTimingMs: {
+        fetchMs: timer.segmentMs("fetchStart", "rasterizeStart"),
+        rasterizeMs: timer.segmentMs("rasterizeStart", "rasterizeEnd"),
+      },
+    };
+  }
+}
+
+interface TranscribePreparedFileInput {
+  blob: BlobRef;
+  promptTask: "diplomatic-transcription" | "project-notebook";
+  aiEnabled: boolean;
+  pageImageUrls: PageImageUrl[];
+  extractionPlan: ExtractionPlan;
+}
+
+interface TranscribeFileStepResult {
+  subDocuments: TranscribedSubDocument[];
+  model?: string;
+  inputTokens?: number;
+  outputTokens?: number;
+  errors: TranscriptionError[];
+  transcribeMs: number;
+  transcribeChunkCount?: number;
+}
+
+async function transcribePreparedFile(
+  input: TranscribePreparedFileInput,
+): Promise<TranscribeFileStepResult> {
+  const transcribeStarted = Date.now();
+  const { blob, promptTask, aiEnabled, pageImageUrls, extractionPlan } = input;
+  const errors: TranscriptionError[] = [];
+
+  if (!aiEnabled || !isTranscribableMediaType(blob.contentType)) {
+    return {
+      subDocuments: [],
+      errors,
+      transcribeMs: Date.now() - transcribeStarted,
+    };
+  }
+
+  const pageCount = Math.max(1, extractionPlan.pageCount);
+  const useChunked = shouldUsePageChunkedTranscription({
+    mimeType: blob.contentType,
+    fileSizeBytes: blob.size,
+    pageCount,
+  });
+
+  await emitEvent({
+    type: "file-stage",
+    fileName: blob.name,
+    stage: "transcribing",
+    at: new Date().toISOString(),
+  });
+
+  try {
+    if (useChunked && pageImageUrls.length > 0) {
+      const chunkSize = getPageChunkSize();
+      const ranges = partitionPageRanges(pageCount, chunkSize);
+      const urlByPage = new Map<number, string>();
+      for (const entry of pageImageUrls) {
+        urlByPage.set(entry.pageIndex + 1, entry.url);
+      }
+
+      const chunkResults: TranscribePageChunkResult[] = [];
+      for (
+        let offset = 0;
+        offset < ranges.length;
+        offset += PAGE_CHUNK_CONCURRENCY
+      ) {
+        const batch = ranges.slice(offset, offset + PAGE_CHUNK_CONCURRENCY);
+        const settled = await Promise.all(
+          batch.map((range) =>
+            transcribePageChunkStep({
+              fileName: blob.name,
+              promptTask,
+              pages: Array.from(
+                { length: range.endPage - range.startPage + 1 },
+                (_, index) => {
+                  const pageNumber = range.startPage + index;
+                  return {
+                    pageNumber,
+                    url: urlByPage.get(pageNumber) ?? "",
+                  };
+                },
+              ).filter((page) => page.url.length > 0),
+            }),
+          ),
+        );
+        chunkResults.push(...settled);
+      }
+
+      const sampleUrl = pageImageUrls[0]?.url;
+      const metadata =
+        sampleUrl !== undefined
+          ? await extractMetadataStep({
+              fileName: blob.name,
+              samplePageUrl: sampleUrl,
+              mergedTextExcerpt: chunkResults
+                .flatMap((chunk) => chunk.pages.map((p) => p.text))
+                .join("\n\n"),
+              totalPages: pageCount,
+            })
+          : {
+              title: "",
+              documentType: "Unknown",
+              date: "Unknown",
+              authors: [],
+              recipients: [],
+              mentionedNames: [],
+              subjects: [],
+            };
+
+      const merged = mergePageChunkResults(
+        chunkResults,
+        pageCount,
+        metadata,
+      );
+
+      const transcribeMs = Date.now() - transcribeStarted;
+      console.info("[batch-ingest] transcribe:chunked", {
+        fileName: blob.name,
+        chunks: ranges.length,
+        transcribeMs,
+      });
+
+      return {
+        subDocuments: merged.subDocuments,
+        model: merged.model,
+        inputTokens: merged.inputTokens,
+        outputTokens: merged.outputTokens,
+        errors,
+        transcribeMs,
+        transcribeChunkCount: ranges.length,
+      };
+    }
+
+    const result = await transcribeWholeFileStep({
+      blob,
+      promptTask,
+    });
+
+    return {
+      ...result,
+      transcribeMs: Date.now() - transcribeStarted,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    errors.push({ fileName: blob.name, stage: "transcription", message });
+    if (isTransientError(error)) {
+      throw new RetryableError(
+        `Transcription failed for ${blob.name}: ${message}`,
+      );
+    }
+    return {
+      subDocuments: [],
+      errors,
+      transcribeMs: Date.now() - transcribeStarted,
+    };
+  }
+}
+
+async function transcribeWholeFileStep(input: {
+  blob: BlobRef;
+  promptTask: "diplomatic-transcription" | "project-notebook";
+}): Promise<Omit<TranscribeFileStepResult, "transcribeMs">> {
+  "use step";
+
+  const bytes = await fetchBlobBytes(input.blob);
+  const transcribed = await transcribeDocument({
+    bytes,
+    mediaType: input.blob.contentType,
+    promptTask: input.promptTask,
+  });
+  return {
+    subDocuments: transcribed.subDocuments,
+    model: transcribed.model,
+    inputTokens: transcribed.inputTokens,
+    outputTokens: transcribed.outputTokens,
+    errors: [],
+  };
+}
+
+async function transcribePageChunkStep(input: {
+  fileName: string;
+  promptTask: "diplomatic-transcription" | "project-notebook";
+  pages: Array<{ pageNumber: number; url: string }>;
+}): Promise<TranscribePageChunkResult> {
+  "use step";
+
+  if (input.pages.length === 0) {
+    return {
+      pages: [],
+      model: "skipped",
+      promptVersion: "skipped",
+    };
+  }
+
+  try {
+    return await transcribePageChunk({
+      pages: input.pages,
+      promptTask: input.promptTask,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (isTransientError(error)) {
+      throw new RetryableError(
+        `Page chunk transcription failed for ${input.fileName}: ${message}`,
+      );
+    }
+    throw error;
+  }
+}
+
+async function extractMetadataStep(input: {
+  fileName: string;
+  samplePageUrl: string;
+  mergedTextExcerpt: string;
+  totalPages: number;
+}) {
+  "use step";
+
+  try {
+    return await extractDocumentMetadataFromSample({
+      samplePageUrl: input.samplePageUrl,
+      mergedTextExcerpt: input.mergedTextExcerpt,
+      totalPages: input.totalPages,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn("[batch-ingest] metadata:failed", {
+      fileName: input.fileName,
+      message,
+    });
+    return {
+      title: "",
+      documentType: "Unknown",
+      date: "Unknown",
+      authors: [] as string[],
+      recipients: [] as string[],
+      mentionedNames: [] as string[],
+      subjects: [] as string[],
+    };
+  }
+}
+
+interface PersistSubDocumentsStepInput {
+  folderId?: string;
+  blob: BlobRef;
+  batchIndex: number;
+  documentId: string;
+  subDocuments: TranscribedSubDocument[];
+  model?: string;
+  inputTokens?: number;
+  outputTokens?: number;
+  pageImageUrls: PageImageUrl[];
+  rasterizeError?: string;
+  extractionPlan: ExtractionPlan;
+  stageTimingMs: Pick<
+    FileStageTimingMs,
+    "fetchMs" | "rasterizeMs" | "rasterizeBackend"
+  > & {
+    transcribeMs: number;
+    transcribeChunkCount?: number;
+    totalMs: number;
+  };
+}
+
+interface PersistSubDocumentsStepResult {
+  documentPackages: DocumentPackage[];
+  transcriptions: TranscriptionRun[];
+  metadata: MetadataExtraction[];
+}
+
+async function persistSubDocumentsStep(
+  input: PersistSubDocumentsStepInput,
+): Promise<PersistSubDocumentsStepResult> {
+  "use step";
+
+  const { folderId, blob, batchIndex, documentId } = input;
+  const timer = new StageTimer();
+  timer.mark("persistStart");
+
+  await emitEvent({
+    type: "file-stage",
+    fileName: blob.name,
+    stage: "saving",
+    at: new Date().toISOString(),
+  });
+
+  const sourceFile: SourceFile = {
+    id: crypto.randomUUID(),
+    name: blob.name,
+    size: blob.size,
+    mimeType: blob.contentType,
+  };
+
+  const processed = await processSourceFileSubDocuments({
+    sourceFile,
+    bytes: new Uint8Array(0),
+    extractionPlan: input.extractionPlan,
+    folderId,
+    batchIndex,
+    existingIds: new Set(),
+    providedDocumentId: documentId,
+    subDocuments: input.subDocuments,
+    model: input.model,
+    inputTokens: input.inputTokens,
+    outputTokens: input.outputTokens,
+    pageImageUrls: input.pageImageUrls,
+    rasterizeError: input.rasterizeError,
+  });
+
+  const repository = getEdisonService().getRepository();
+  for (const sibling of processed.siblings) {
+    await repository.saveProcessedDocument(
+      sibling.documentPackage,
+      sibling.transcription,
+      sibling.metadata,
+    );
+  }
+
+  timer.mark("persistEnd");
+  const persistMs = timer.segmentMs("persistStart", "persistEnd");
+  const stageTimingMs: FileStageTimingMs = {
+    fetchMs: input.stageTimingMs.fetchMs,
+    rasterizeMs: input.stageTimingMs.rasterizeMs,
+    transcribeMs: input.stageTimingMs.transcribeMs,
+    persistMs,
+    totalMs:
+      input.stageTimingMs.fetchMs +
+      input.stageTimingMs.rasterizeMs +
+      input.stageTimingMs.transcribeMs +
+      persistMs,
+    transcribeChunkCount: input.stageTimingMs.transcribeChunkCount,
+    rasterizeBackend: input.stageTimingMs.rasterizeBackend,
+  };
+
+  const primary = processed.siblings[0]?.documentPackage;
+  await emitEvent({
+    type: "file-completed",
+    fileName: blob.name,
+    documentId: primary?.documentId ?? documentId,
+    at: new Date().toISOString(),
+    stageTimingMs,
+  });
+  console.info("[batch-ingest] file:done", {
+    fileName: blob.name,
+    documentId: primary?.documentId ?? documentId,
+    siblings: processed.siblings.length,
+    stageTimingMs,
+  });
+
+  return {
+    documentPackages: processed.siblings.map((s) => s.documentPackage),
+    transcriptions: processed.siblings.map((s) => s.transcription),
+    metadata: processed.siblings.map((s) => s.metadata),
+  };
+}
 
 async function emitBatchStartedStep(input: {
   folderId?: string;
@@ -202,10 +723,6 @@ async function emitBatchStartedStep(input: {
   });
 }
 
-// Reads the existing document IDs once and assigns a collision-free identifier
-// to every incoming file, accumulating assignments so two files in the same
-// batch that embed the same ID get distinct identifiers. Runs as a single
-// durable step before any concurrent processing.
 async function assignIdsStep(input: {
   folderId?: string;
   fileNames: string[];
@@ -229,263 +746,6 @@ async function assignIdsStep(input: {
     existingIds.add(assigned.documentId);
     return assigned.documentId;
   });
-}
-
-interface TranscribeFileStepInput {
-  blob: BlobRef;
-  promptTask: "diplomatic-transcription" | "project-notebook";
-  aiEnabled: boolean;
-}
-
-interface TranscribeFileStepResult {
-  // Sub-documents detected by the model. Always populated: AI-enabled paths
-  // return what the model produced; AI-disabled or transcription-failure paths
-  // return an empty array so the persist step still emits a single placeholder
-  // sub-document covering every page.
-  subDocuments: TranscribedSubDocument[];
-  model?: string;
-  inputTokens?: number;
-  outputTokens?: number;
-  errors: TranscriptionError[];
-}
-
-// Step 1: fetch the blob and run the single OCR/HTR + indexing model call. This
-// is the only AI request per file; metadata is produced in the same call so a
-// rate-limited index can never fail a file on its own.
-async function transcribeFileStep(
-  input: TranscribeFileStepInput,
-): Promise<TranscribeFileStepResult> {
-  "use step";
-
-  const { blob, promptTask, aiEnabled } = input;
-  console.info("[batch-ingest] file:start", { fileName: blob.name });
-
-  await emitEvent({
-    type: "file-stage",
-    fileName: blob.name,
-    stage: "fetching",
-    at: new Date().toISOString(),
-  });
-
-  const bytes = await fetchBlobBytes(blob);
-  const errors: TranscriptionError[] = [];
-
-  if (aiEnabled && isTranscribableMediaType(blob.contentType)) {
-    await emitEvent({
-      type: "file-stage",
-      fileName: blob.name,
-      stage: "transcribing",
-      at: new Date().toISOString(),
-    });
-    try {
-      const transcribed = await transcribeDocument({
-        bytes,
-        mediaType: blob.contentType,
-        promptTask,
-      });
-      return {
-        subDocuments: transcribed.subDocuments,
-        model: transcribed.model,
-        inputTokens: transcribed.inputTokens,
-        outputTokens: transcribed.outputTokens,
-        errors,
-      };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      errors.push({ fileName: blob.name, stage: "transcription", message });
-      if (isTransientError(error)) {
-        throw new RetryableError(
-          `Transcription failed for ${blob.name}: ${message}`,
-        );
-      }
-    }
-  }
-
-  return { subDocuments: [], errors };
-}
-
-interface RasterizeFileStepInput {
-  blob: BlobRef;
-  documentId: string;
-}
-
-interface RasterizeFileStepResult {
-  urls: PageImageUrl[];
-  // Populated when PDF rasterization could not produce any page images. The
-  // persist step copies this into `validationWarnings` and `PageImage.renderError`
-  // so the reviewer sees *why* the source image is missing instead of an
-  // empty frame.
-  error?: string;
-}
-
-// Step 1.5: render each PDF page to a JPG and upload it to Blob, returning a
-// per-page URL list the persist step then attaches to the document. Image
-// uploads short-circuit to a single entry pointing at the original blob URL,
-// so the viewer renders them through the same `<img>` path as PDF pages.
-//
-// Failures are non-fatal: we record the reason on the result so the persist
-// step can attach it to the saved DocumentPackage, and we emit a `file-warning`
-// event so the reviewer sees it in the upload tracker. This keeps a single
-// bad PDF from poisoning a whole batch while making the failure visible
-// instead of degrading silently into a blank placeholder.
-async function rasterizeFileStep(
-  input: RasterizeFileStepInput,
-): Promise<RasterizeFileStepResult> {
-  "use step";
-
-  const { blob, documentId } = input;
-  const contentType = blob.contentType.toLowerCase();
-
-  if (contentType !== "application/pdf") {
-    if (contentType.startsWith("image/")) {
-      return { urls: [{ pageIndex: 0, url: blob.url }] };
-    }
-    return { urls: [] };
-  }
-
-  await emitEvent({
-    type: "file-stage",
-    fileName: blob.name,
-    stage: "rasterizing",
-    at: new Date().toISOString(),
-  });
-
-  try {
-    const bytes = await fetchBlobBytes(blob);
-    const pages = await rasterizePdfPages(bytes);
-    const uploaded: PageImageUrl[] = [];
-    for (const page of pages) {
-      const pageNumber = page.pageIndex + 1;
-      const padded = String(pageNumber).padStart(4, "0");
-      // Vercel Blob's PutBody type rejects raw Uint8Array but accepts Buffer.
-      // Wrapping the rasterized JPG in Buffer.from is a no-copy adapter on
-      // Node runtimes.
-      const result = await put(
-        `page-images/${encodeURIComponent(documentId)}/${padded}.jpg`,
-        Buffer.from(page.jpg.buffer, page.jpg.byteOffset, page.jpg.byteLength),
-        {
-          access: "public",
-          contentType: "image/jpeg",
-          addRandomSuffix: true,
-        },
-      );
-      uploaded.push({
-        pageIndex: page.pageIndex,
-        url: result.url,
-        width: page.width,
-        height: page.height,
-      });
-    }
-    return { urls: uploaded };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.warn("[batch-ingest] rasterize:failed", {
-      fileName: blob.name,
-      message,
-    });
-    const summary = `PDF rasterization failed: ${message}`;
-    await emitEvent({
-      type: "file-warning",
-      fileName: blob.name,
-      message: summary,
-      at: new Date().toISOString(),
-    });
-    return { urls: [], error: summary };
-  }
-}
-
-interface PersistSubDocumentsStepInput {
-  folderId?: string;
-  blob: BlobRef;
-  batchIndex: number;
-  // The pre-assigned base document id for the uploaded source. Position-0
-  // sibling keeps this id; positions 1..N get suffixed.
-  documentId: string;
-  subDocuments: TranscribedSubDocument[];
-  model?: string;
-  inputTokens?: number;
-  outputTokens?: number;
-  pageImageUrls: PageImageUrl[];
-  // Carried through from the rasterize step so every persisted sibling can
-  // surface the failure reason via `validationWarnings` and per-page
-  // `renderError`. Undefined when rasterization succeeded.
-  rasterizeError?: string;
-}
-
-interface PersistSubDocumentsStepResult {
-  documentPackages: DocumentPackage[];
-  transcriptions: TranscriptionRun[];
-  metadata: MetadataExtraction[];
-}
-
-// Step 2: extract pages, mint sibling ids for every detected sub-document,
-// build per-sibling page subsets + transcriptions + metadata, and persist
-// every record (no AI call). Single-document uploads collapse to one
-// sibling so the surrounding flow stays uniform.
-async function persistSubDocumentsStep(
-  input: PersistSubDocumentsStepInput,
-): Promise<PersistSubDocumentsStepResult> {
-  "use step";
-
-  const { folderId, blob, batchIndex, documentId } = input;
-
-  await emitEvent({
-    type: "file-stage",
-    fileName: blob.name,
-    stage: "saving",
-    at: new Date().toISOString(),
-  });
-
-  const bytes = await fetchBlobBytes(blob);
-  const sourceFile: SourceFile = {
-    id: crypto.randomUUID(),
-    name: blob.name,
-    size: blob.size,
-    mimeType: blob.contentType,
-  };
-
-  const processed = await processSourceFileSubDocuments({
-    sourceFile,
-    bytes,
-    folderId,
-    batchIndex,
-    existingIds: new Set(),
-    providedDocumentId: documentId,
-    subDocuments: input.subDocuments,
-    model: input.model,
-    inputTokens: input.inputTokens,
-    outputTokens: input.outputTokens,
-    pageImageUrls: input.pageImageUrls,
-    rasterizeError: input.rasterizeError,
-  });
-
-  const repository = getEdisonService().getRepository();
-  for (const sibling of processed.siblings) {
-    await repository.saveProcessedDocument(
-      sibling.documentPackage,
-      sibling.transcription,
-      sibling.metadata,
-    );
-  }
-
-  const primary = processed.siblings[0]?.documentPackage;
-  await emitEvent({
-    type: "file-completed",
-    fileName: blob.name,
-    documentId: primary?.documentId ?? documentId,
-    at: new Date().toISOString(),
-  });
-  console.info("[batch-ingest] file:done", {
-    fileName: blob.name,
-    documentId: primary?.documentId ?? documentId,
-    siblings: processed.siblings.length,
-  });
-
-  return {
-    documentPackages: processed.siblings.map((s) => s.documentPackage),
-    transcriptions: processed.siblings.map((s) => s.transcription),
-    metadata: processed.siblings.map((s) => s.metadata),
-  };
 }
 
 async function emitFileFailedStep(input: {
@@ -541,8 +801,6 @@ async function finalizeBatchStep(input: {
     });
   }
 }
-
-// ---------- helpers ----------
 
 function buildResult(results: FileResult[]): ManualIngestResult {
   return {

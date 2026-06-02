@@ -128,9 +128,9 @@ describe("ReviewerWorkbench", () => {
 
     expect(screen.getByText("D9032-F")).toBeInTheDocument();
     expect(screen.getAllByText("D9032-00001").length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByLabelText("Diplomatic transcription")).toHaveValue(
-      sampleTranscription.diplomaticText,
-    );
+    expect(
+      (screen.getByLabelText("Body text") as HTMLTextAreaElement).value,
+    ).toContain("[filament?]");
   });
 
   it("allows reviewers to edit transcription text", async () => {
@@ -143,11 +143,11 @@ describe("ReviewerWorkbench", () => {
       />,
     );
 
-    const textarea = screen.getByLabelText("Diplomatic transcription");
-    await user.clear(textarea);
-    await user.type(textarea, "Corrected transcription");
+    const bodyField = screen.getByLabelText("Body text");
+    await user.clear(bodyField);
+    await user.type(bodyField, "Corrected transcription");
 
-    expect(textarea).toHaveValue("Corrected transcription");
+    expect(bodyField).toHaveValue("Corrected transcription");
   });
 
   it("shows blocked files without crashing the viewer", () => {

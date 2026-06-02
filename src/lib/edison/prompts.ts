@@ -8,8 +8,25 @@ export const PROMPT_LIBRARY: PromptVersion[] = [
     id: "diplomatic-transcription-v2",
     task: "diplomatic-transcription",
     version: "2.0.0",
-    active: true,
+    active: false,
     prompt: `These are the image files for Doc ID [provide ID]. It is in Folder ID [provide ID]. It is a [type of document]. Transcribe the text with the following format order: Letterhead, dateline, salutation, body of the text, closing text, signature, any annotations to the document. Use formatting from the original: paragraphing (without line breaks), punctuation, and underlining. If less than 70% confident of a word or phrase, put it in brackets with a question mark at the end. Put any annotations or marginal notes at the end. Handwritten marginal notes should be italicized and put in angle brackets <> with position indicated in square brackets []. Any lists or financial statements should be formatted as a table. Use each image name as a heading before its text.`,
+  },
+  {
+    id: "diplomatic-transcription-v3",
+    task: "diplomatic-transcription",
+    version: "3.0.0",
+    active: true,
+    prompt: `These are the image files for Doc ID [provide ID]. It is in Folder ID [provide ID]. It is a [type of document]. Transcribe using Edison Markdown v1:
+
+Output rules:
+- Start each page with a Markdown heading: ## {exact image filename}
+- Use these exact section labels on their own line, followed by the section text on following lines (blank line between sections): Letterhead:, Dateline:, To:, From:, Salutation:, Body:, Closing:, Signature:, Annotations:
+- Include To: and From: only when visible on the source. Omit unused sections.
+- Preserve original spelling, abbreviations, punctuation, and underlining. Use paragraph breaks between sections, not mid-sentence line breaks.
+- If less than 70% confident of a word or phrase, bracket it with a trailing question mark, e.g. [filament?]
+- Handwritten marginal notes go under Annotations:, italicized in angle brackets <> with position in square brackets [], e.g. <note text> [right margin]
+- Lists, ledgers, and financial statements MUST use GitHub-flavored Markdown pipe tables with a header row and | --- | separator row. Never use tab-separated columns or plain prose for tabular data.
+- Do not pad with spaces for visual alignment; layout is applied in the review UI.`,
   },
   {
     id: "metadata-extraction-v3",

@@ -19,6 +19,13 @@ export interface DocumentRecords {
   metadata: Record<string, MetadataExtraction>;
 }
 
+export interface DocumentRecordsPage extends DocumentRecords {
+  totalCount: number;
+  offset: number;
+  limit: number;
+  hasMore: boolean;
+}
+
 export interface ReviewCase {
   documents: DocumentPackage[];
   selectedDocumentId: string;
@@ -38,6 +45,10 @@ export interface EdisonRepository {
   // workflow to assign collision-free IDs without fetching every record body.
   listDocumentIds(): Promise<string[]>;
   listDocumentRecords(): Promise<DocumentRecords>;
+  listDocumentRecordsPage(input: {
+    offset: number;
+    limit: number;
+  }): Promise<DocumentRecordsPage>;
   getDocumentRecord(documentId: string): Promise<DocumentRecord | null>;
   saveDocuments(documents: DocumentPackage[]): Promise<void>;
   saveProcessedDocuments(

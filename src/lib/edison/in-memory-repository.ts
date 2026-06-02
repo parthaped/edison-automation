@@ -3,6 +3,7 @@ import { sampleDocuments, sampleMetadata, sampleTranscription } from "./sample-d
 import type {
   DocumentRecord,
   DocumentRecords,
+  DocumentRecordsPage,
   EdisonRepository,
   ReviewCase,
 } from "./repositories";
@@ -65,6 +66,31 @@ export class InMemoryEdisonRepository implements EdisonRepository {
         this.metadata.get(document.documentId) ?? emptyMetadata(document);
     }
     return { documents, transcriptions, metadata };
+  }
+
+  async listDocumentRecordsPage(input: {
+    offset: number;
+    limit: number;
+  }): Promise<DocumentRecordsPage> {
+    const all = await this.listDocumentRecords();
+    const offset = Math.max(0, input.offset);
+    const limit = Math.max(1, input.limit);
+    const documents = all.documents.slice(offset, offset + limit);
+    const transcriptions: Record<string, TranscriptionRun> = {};
+    const metadata: Record<string, MetadataExtraction> = {};
+    for (const document of documents) {
+      transcriptions[document.documentId] = all.transcriptions[document.documentId];
+      metadata[document.documentId] = all.metadata[document.documentId];
+    }
+    return {
+      documents,
+      transcriptions,
+      metadata,
+      totalCount: all.documents.length,
+      offset,
+      limit,
+      hasMore: offset + limit < all.documents.length,
+    };
   }
 
   async saveDocuments(documents: DocumentPackage[]): Promise<void> {

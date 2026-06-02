@@ -153,7 +153,7 @@ const subDocumentSchema = z.object({
   transcription: z
     .string()
     .describe(
-      "The full diplomatic transcription of THIS sub-document only, following every formatting rule in the instructions above. Use the document's own paragraphing, punctuation, and underlining; bracket low-confidence readings with a trailing question mark; place annotations and marginal notes at the end.",
+      "The full diplomatic transcription of THIS sub-document only in Edison Markdown v1: ## page headings per image filename; exact section labels (Letterhead:, Dateline:, To:, From:, Salutation:, Body:, Closing:, Signature:, Annotations:); GFM pipe tables for ledgers; bracket low-confidence readings with a trailing question mark; marginal notes under Annotations: in angle brackets with position in square brackets.",
     ),
   title: z
     .string()

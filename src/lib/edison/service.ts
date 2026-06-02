@@ -5,6 +5,7 @@ import {
   buildPageManifestForRange,
   createDocumentPackage,
   createExtractionPlan,
+  type ExtractionPlan,
 } from "./extraction";
 import { buildExportCsv, buildExportCsvRow } from "./export-csv";
 import {
@@ -307,6 +308,8 @@ export interface TranscribedSubDocument {
 export interface ProcessSourceSubDocumentsInput {
   sourceFile: SourceFile;
   bytes: Uint8Array;
+  /** When supplied, skips re-opening the source bytes for page count / validation. */
+  extractionPlan?: ExtractionPlan;
   folderId?: string;
   // Pre-assigned, collision-free base document identifier for this source
   // file. Position-0 sibling keeps this id; siblings 1..N get suffixed via
@@ -346,7 +349,9 @@ export interface ProcessSourceSubDocumentsResult {
 export async function processSourceFileSubDocuments(
   input: ProcessSourceSubDocumentsInput,
 ): Promise<ProcessSourceSubDocumentsResult> {
-  const plan = await createExtractionPlan(input.sourceFile, input.bytes);
+  const plan =
+    input.extractionPlan ??
+    (await createExtractionPlan(input.sourceFile, input.bytes));
   const folderId = input.folderId
     ? normalizeFolderId(input.folderId)
     : "UNASSIGNED-F";
@@ -595,17 +600,36 @@ export class EdisonAutomationService {
     return { summary: summarizeDocuments(documents) };
   }
 
-  // Loads everything the review page needs in a single store read: the summary
-  // counts and the review case are both derived from one records snapshot
-  // instead of issuing three separate full-store scans.
-  async getReviewWorkbench(documentId?: string): Promise<{
+  // Loads review workbench data. Summary counts scan every record; the review
+  // queue loads one paginated window so large datasets do not fetch every JSON
+  // body on each page view.
+  async getReviewWorkbench(
+    documentId?: string,
+    pagination?: { offset?: number; limit?: number },
+  ): Promise<{
     summary: DashboardSummary;
     reviewCase: ReviewCase | null;
+    totalDocuments: number;
+    reviewOffset: number;
+    reviewLimit: number;
+    hasMoreReviewDocuments: boolean;
   }> {
-    const records = await this.repository.listDocumentRecords();
+    const reviewLimit = pagination?.limit ?? 50;
+    const reviewOffset = pagination?.offset ?? 0;
+    const [summaryRecords, page] = await Promise.all([
+      this.repository.listDocumentRecords(),
+      this.repository.listDocumentRecordsPage({
+        offset: reviewOffset,
+        limit: reviewLimit,
+      }),
+    ]);
     return {
-      summary: summarizeDocuments(records.documents),
-      reviewCase: buildReviewCase(records, documentId),
+      summary: summarizeDocuments(summaryRecords.documents),
+      reviewCase: buildReviewCase(page, documentId),
+      totalDocuments: page.totalCount,
+      reviewOffset: page.offset,
+      reviewLimit: page.limit,
+      hasMoreReviewDocuments: page.hasMore,
     };
   }
 
