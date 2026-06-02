@@ -1,6 +1,5 @@
 "use client";
 
-import { upload } from "@vercel/blob/client";
 import {
   ArrowRight,
   CheckCircle2,
@@ -8,114 +7,57 @@ import {
   Loader2,
   Upload as UploadIcon,
 } from "lucide-react";
-import { useRouter } from "next/navigation";
-import { useEffect, useId, useRef, useState } from "react";
+import Link from "next/link";
+import { useId, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { FilePipelineTracker } from "@/components/upload/file-pipeline-tracker";
-import type { IngestJobSnapshot } from "@/lib/edison/ingest-job-store";
-import type { ManualIngestResult } from "@/lib/edison/service";
+import {
+  type PromptTask,
+  type UploadProgress,
+  useActiveIngest,
+} from "@/components/workbench/active-ingest-provider";
 import {
   ACCEPT_ATTR,
   ACCEPTED_UPLOAD_EXTENSIONS,
   ACCEPTED_UPLOAD_MIME_TYPES,
-  BLOB_UPLOAD_TIMEOUT_MS,
   DIRECT_INGEST_MAX_BYTES,
   inferUploadContentType,
   MAX_UPLOAD_BYTES,
   partitionFilesIntoUploadBatches,
-  shouldUseBlobMultipartUpload,
 } from "@/lib/edison/upload-constraints";
-
-type Status =
-  | "idle"
-  | "uploading"
-  | "finalizing"
-  | "processing"
-  | "success"
-  | "error";
-
-interface UploadProgress {
-  fileName: string;
-  fileIndex: number;
-  totalFiles: number;
-  uploadBatchIndex: number;
-  totalUploadBatches: number;
-  // Monotonic 0-100 for the current file. We never let this go backwards so
-  // @vercel/blob's internal async-retry behavior doesn't show as a bouncing
-  // progress bar.
-  percentage: number;
-  // 0-100 across the whole selection (uploaded bytes / total bytes).
-  batchPercentage: number;
-  retrying: boolean;
-}
 
 interface UploadBatchFormProps {
   blobReady: boolean;
 }
 
-type PromptTask = "diplomatic-transcription" | "project-notebook";
-
-// Grace period before automatically moving the reviewer to the review tab,
-// leaving a moment to grab the batch ZIP if they want it.
-const REVIEW_REDIRECT_DELAY_MS = 1800;
-
 export function UploadBatchForm({ blobReady }: UploadBatchFormProps) {
-  const router = useRouter();
   const filesInputId = useId();
   const filesLabelId = useId();
   const folderInputId = useId();
   const promptInputId = useId();
   const formRef = useRef<HTMLFormElement | null>(null);
-  const abortControllerRef = useRef<AbortController | null>(null);
-  const redirectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [files, setFiles] = useState<File[]>([]);
   const [promptTask, setPromptTask] = useState<PromptTask>(
     "diplomatic-transcription",
   );
-  const [status, setStatus] = useState<Status>("idle");
-  const [result, setResult] = useState<ManualIngestResult | null>(null);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [uploadProgress, setUploadProgress] = useState<UploadProgress | null>(
-    null,
-  );
-  const [ingestJob, setIngestJob] = useState<IngestJobSnapshot | null>(null);
+  const [validationError, setValidationError] = useState<string | null>(null);
+  const {
+    status,
+    result,
+    errorMessage,
+    uploadProgress,
+    ingestJob,
+    busy,
+    reviewHref,
+    startIngest,
+    cancelIngest,
+    resetIngest,
+    downloadBatch,
+  } = useActiveIngest();
   const [downloading, setDownloading] = useState(false);
-
-  const busy =
-    status === "uploading" ||
-    status === "finalizing" ||
-    status === "processing";
   const canDownload = Boolean(result && result.packages.length > 0);
-
-  function cancelAutoRedirect() {
-    if (redirectTimerRef.current) {
-      clearTimeout(redirectTimerRef.current);
-      redirectTimerRef.current = null;
-    }
-  }
-
-  useEffect(() => cancelAutoRedirect, []);
-
-  function reviewTarget(ingestResult: ManualIngestResult): string {
-    const firstReviewable = ingestResult.packages.find(
-      (pkg) => pkg.status === "needs_review",
-    );
-    const target = firstReviewable ?? ingestResult.packages[0];
-    return target
-      ? `/review?doc=${encodeURIComponent(target.documentId)}`
-      : "/review";
-  }
-
-  function goToReview() {
-    cancelAutoRedirect();
-    if (result) {
-      router.push(reviewTarget(result));
-    } else {
-      router.push("/review");
-    }
-  }
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -133,177 +75,31 @@ export function UploadBatchForm({ blobReady }: UploadBatchFormProps) {
 
     const validationError = validateFiles(files, blobReady);
     if (validationError) {
-      setStatus("error");
-      setErrorMessage(validationError);
+      setValidationError(validationError);
       toast.error("Upload blocked", { description: validationError });
       return;
     }
 
-    const abortController = new AbortController();
-    abortControllerRef.current = abortController;
-    setStatus("uploading");
-    setErrorMessage(null);
-    setResult(null);
-    setIngestJob(null);
-    setUploadProgress(null);
-
-    try {
-      const uploadBatches = blobReady
-        ? partitionFilesIntoUploadBatches(files)
-        : [files];
-      const totalSelectionBytes =
-        files.reduce((sum, file) => sum + file.size, 0) || 1;
-      let bytesFromCompletedBatches = 0;
-      let fileIndexOffset = 0;
-      let mergedResult: ManualIngestResult | null = null;
-      let lastJob: IngestJobSnapshot | null = null;
-
-      for (const [batchIndex, batchFiles] of uploadBatches.entries()) {
-        const job = blobReady
-          ? await uploadFilesToBlob(
-              batchFiles,
-              folderId,
-              promptTask,
-              abortController.signal,
-              setUploadProgress,
-              () => setStatus("finalizing"),
-              {
-                totalFiles: files.length,
-                fileIndexOffset,
-                totalBytes: totalSelectionBytes,
-                bytesBeforeBatch: bytesFromCompletedBatches,
-                uploadBatchIndex: batchIndex + 1,
-                totalUploadBatches: uploadBatches.length,
-              },
-            )
-          : await uploadFilesDirectly(
-              batchFiles,
-              folderId,
-              promptTask,
-              abortController.signal,
-            );
-
-        setUploadProgress(null);
-        setStatus("processing");
-        setIngestJob(job);
-        lastJob = job;
-
-        const finalJob = await waitForIngestJob(
-          job.batchId,
-          abortController.signal,
-          setIngestJob,
-        );
-
-        if (!finalJob.result) {
-          throw new Error("Job completed but no result payload was returned.");
-        }
-
-        mergedResult = mergedResult
-          ? mergeIngestResults(mergedResult, finalJob.result)
-          : finalJob.result;
-        bytesFromCompletedBatches += batchFiles.reduce(
-          (sum, file) => sum + file.size,
-          0,
-        );
-        fileIndexOffset += batchFiles.length;
-      }
-
-      if (!mergedResult || !lastJob) {
-        throw new Error("Upload did not produce any ingest results.");
-      }
-
-      setResult(mergedResult);
-      setStatus("success");
-      setIngestJob(lastJob);
-      const warnings = mergedResult.transcriptionErrors.length;
-      toast.success(
-        `Processed ${mergedResult.packages.length} file${
-          mergedResult.packages.length === 1 ? "" : "s"
-        }`,
-        {
-          description:
-            warnings > 0
-              ? `${warnings} warning${warnings === 1 ? "" : "s"} — opening review.`
-              : uploadBatches.length > 1
-                ? `Uploaded in ${uploadBatches.length} batches — opening review.`
-                : "Transcription complete — opening review.",
-        },
-      );
-      const completedResult = mergedResult;
-      cancelAutoRedirect();
-      redirectTimerRef.current = setTimeout(() => {
-        redirectTimerRef.current = null;
-        router.push(reviewTarget(completedResult));
-      }, REVIEW_REDIRECT_DELAY_MS);
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Unknown network error.";
-      setStatus("error");
-      setErrorMessage(message);
-      setUploadProgress(null);
-      toast.error(
-        abortController.signal.aborted ? "Upload canceled" : "Upload failed",
-        { description: message },
-      );
-    } finally {
-      abortControllerRef.current = null;
-    }
+    setValidationError(null);
+    await startIngest({ files, folderId, promptTask, blobReady });
   }
 
   function handleReset() {
-    cancelAutoRedirect();
-    abortControllerRef.current?.abort();
+    resetIngest();
     setFiles([]);
-    setResult(null);
-    setStatus("idle");
-    setErrorMessage(null);
-    setUploadProgress(null);
-    setIngestJob(null);
+    setValidationError(null);
     formRef.current?.reset();
   }
 
   function handleCancel() {
-    abortControllerRef.current?.abort();
+    cancelIngest();
   }
 
   async function handleDownload() {
     if (!result) return;
-    cancelAutoRedirect();
     setDownloading(true);
     try {
-      const response = await fetch("/api/export/batch", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          packages: result.packages,
-          transcriptions: result.transcriptions,
-          metadata: result.metadata,
-        }),
-      });
-      if (!response.ok) {
-        const body = (await safeReadJson(response)) as { error?: string };
-        toast.error("Download failed", {
-          description:
-            body?.error ?? `Download failed with status ${response.status}.`,
-        });
-        return;
-      }
-      const disposition = response.headers.get("content-disposition") ?? "";
-      const match = /filename="([^"]+)"/.exec(disposition);
-      const fileName = match?.[1] ?? "edison-batch.zip";
-      const blob = await response.blob();
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = fileName;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      URL.revokeObjectURL(url);
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Unknown download error.";
-      toast.error("Download failed", { description: message });
+      await downloadBatch();
     } finally {
       setDownloading(false);
     }
@@ -499,8 +295,10 @@ export function UploadBatchForm({ blobReady }: UploadBatchFormProps) {
           <FilePipelineTracker job={ingestJob} />
         ) : null}
 
-        {errorMessage ? (
-          <p className="mt-3 text-sm text-rose-600">{errorMessage}</p>
+        {validationError || errorMessage ? (
+          <p className="mt-3 text-sm text-rose-600">
+            {validationError ?? errorMessage}
+          </p>
         ) : null}
       </form>
 
@@ -523,7 +321,7 @@ export function UploadBatchForm({ blobReady }: UploadBatchFormProps) {
               </p>
             </div>
           </div>
-          <Button type="button" onClick={goToReview}>
+          <Button render={<Link href={reviewHref} />}>
             Review &amp; verify
             <ArrowRight aria-hidden="true" />
           </Button>
@@ -575,304 +373,6 @@ function UploadProgressBar({
       </p>
     </div>
   );
-}
-
-// Treat a drop of this many percentage points as the @vercel/blob client
-// retrying internally (it uses async-retry, which restarts the body upload
-// on transient failures). Surfacing this avoids the perception of a hang.
-const RETRY_DETECT_DROP_THRESHOLD = 5;
-
-interface UploadScope {
-  totalFiles: number;
-  fileIndexOffset: number;
-  totalBytes: number;
-  bytesBeforeBatch: number;
-  uploadBatchIndex: number;
-  totalUploadBatches: number;
-}
-
-async function uploadFilesToBlob(
-  files: File[],
-  folderId: string | undefined,
-  promptTask: PromptTask,
-  signal: AbortSignal,
-  onProgress: (progress: UploadProgress) => void,
-  onAllUploaded: () => void,
-  scope?: UploadScope,
-): Promise<IngestJobSnapshot> {
-  const blobs: Array<{
-    url: string;
-    name: string;
-    size: number;
-    contentType: string;
-  }> = [];
-
-  const batchBytes = files.reduce((sum, f) => sum + f.size, 0) || 1;
-  let bytesFromCompletedFiles = 0;
-
-  for (const [index, file] of files.entries()) {
-    let maxPercentage = 0;
-    let lastRawPercentage = 0;
-    let retrying = false;
-
-    const emit = (rawPercentage: number) => {
-      const clamped = Math.max(0, Math.min(100, rawPercentage));
-      if (clamped + RETRY_DETECT_DROP_THRESHOLD < lastRawPercentage) {
-        retrying = true;
-      } else if (clamped >= maxPercentage) {
-        retrying = false;
-      }
-      lastRawPercentage = clamped;
-      maxPercentage = Math.max(maxPercentage, clamped);
-      const batchBytesSoFar =
-        bytesFromCompletedFiles + (file.size * maxPercentage) / 100;
-      const overallBytesSoFar =
-        (scope?.bytesBeforeBatch ?? 0) + batchBytesSoFar;
-      const overallTotalBytes = scope?.totalBytes ?? batchBytes;
-      const batchPercentage = Math.min(
-        100,
-        Math.round((overallBytesSoFar / overallTotalBytes) * 100),
-      );
-      onProgress({
-        fileName: file.name,
-        fileIndex: (scope?.fileIndexOffset ?? 0) + index + 1,
-        totalFiles: scope?.totalFiles ?? files.length,
-        uploadBatchIndex: scope?.uploadBatchIndex ?? 1,
-        totalUploadBatches: scope?.totalUploadBatches ?? 1,
-        percentage: Math.round(maxPercentage),
-        batchPercentage,
-        retrying,
-      });
-    };
-
-    emit(0);
-    const contentType = inferUploadContentType(file.name, file.type);
-    const multipart = shouldUseBlobMultipartUpload(file.size);
-    const result = await uploadWithTimeout(
-      file.name,
-      file,
-      {
-        access: "public",
-        handleUploadUrl: "/api/blob/upload-token",
-        contentType,
-        multipart,
-        onUploadProgress: (progress) => emit(progress.percentage),
-      },
-      signal,
-    );
-    bytesFromCompletedFiles += file.size;
-    emit(100);
-    blobs.push({
-      url: result.url,
-      name: file.name,
-      size: file.size,
-      contentType,
-    });
-  }
-
-  onAllUploaded();
-  const response = await fetch("/api/ingest/manual", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ blobs, folderId, promptTask }),
-    signal,
-  });
-  return parseJobResponse(response);
-}
-
-async function uploadFilesDirectly(
-  files: File[],
-  folderId: string | undefined,
-  promptTask: PromptTask,
-  signal: AbortSignal,
-): Promise<IngestJobSnapshot> {
-  const formData = new FormData();
-  for (const file of files) {
-    formData.append("files", file);
-  }
-  if (folderId) {
-    formData.append("folderId", folderId);
-  }
-  formData.append("promptTask", promptTask);
-  const response = await fetch("/api/ingest/manual", {
-    method: "POST",
-    body: formData,
-    signal,
-  });
-  return parseJobResponse(response);
-}
-
-async function uploadWithTimeout(
-  pathname: string,
-  body: File,
-  options: Parameters<typeof upload>[2],
-  signal: AbortSignal,
-) {
-  const uploadController = new AbortController();
-  const onParentAbort = () => uploadController.abort();
-  signal.addEventListener("abort", onParentAbort, { once: true });
-  const timeoutId = setTimeout(
-    () => uploadController.abort(),
-    BLOB_UPLOAD_TIMEOUT_MS,
-  );
-
-  try {
-    return await upload(pathname, body, {
-      ...options,
-      abortSignal: uploadController.signal,
-    });
-  } catch (error) {
-    if (uploadController.signal.aborted && !signal.aborted) {
-      throw new Error(
-        `Upload timed out after ${BLOB_UPLOAD_TIMEOUT_MS / 1000} seconds. Check your network connection and try again.`,
-      );
-    }
-    throw error;
-  } finally {
-    clearTimeout(timeoutId);
-    signal.removeEventListener("abort", onParentAbort);
-  }
-}
-
-async function parseJobResponse(response: Response): Promise<IngestJobSnapshot> {
-  const payload = (await safeReadJson(response)) as
-    | IngestJobSnapshot
-    | ErrorPayload;
-  if (!response.ok) {
-    throw new Error(
-      getErrorMessage(payload, `Upload failed with status ${response.status}.`),
-    );
-  }
-  if (!isJobSnapshot(payload)) {
-    throw new Error("Upload did not return a batch id.");
-  }
-  return payload;
-}
-
-const MAX_CONSECUTIVE_POLL_404S = 3;
-
-async function waitForIngestJob(
-  batchId: string,
-  signal: AbortSignal,
-  onUpdate: (job: IngestJobSnapshot) => void,
-): Promise<IngestJobSnapshot> {
-  let consecutive404s = 0;
-
-  while (!signal.aborted) {
-    const response = await fetch(`/api/ingest/manual/${batchId}`, {
-      cache: "no-store",
-      signal,
-    });
-    const payload = (await safeReadJson(response)) as
-      | IngestJobSnapshot
-      | ErrorPayload;
-
-    if (response.status === 404) {
-      consecutive404s += 1;
-      if (consecutive404s <= MAX_CONSECUTIVE_POLL_404S) {
-        await sleep(1000, signal);
-        continue;
-      }
-      throw new Error(
-        getErrorMessage(
-          payload,
-          "Batch is no longer available. Please retry the upload.",
-        ),
-      );
-    }
-    if (!response.ok) {
-      throw new Error(
-        getErrorMessage(
-          payload,
-          `Batch status failed with ${response.status}.`,
-        ),
-      );
-    }
-    if (!isJobSnapshot(payload)) {
-      throw new Error("Batch status response did not include a batch id.");
-    }
-    consecutive404s = 0;
-    onUpdate(payload);
-    if (payload.status === "completed") {
-      return payload;
-    }
-    if (payload.status === "failed") {
-      throw new Error(payload.error ?? "Transcription failed.");
-    }
-    await sleep(1000, signal);
-  }
-  throw new Error("Upload canceled.");
-}
-
-function sleep(ms: number, signal: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const timeout = window.setTimeout(resolve, ms);
-    signal.addEventListener(
-      "abort",
-      () => {
-        window.clearTimeout(timeout);
-        reject(new Error("Upload canceled."));
-      },
-      { once: true },
-    );
-  });
-}
-
-type ErrorPayload =
-  | { error?: string }
-  | { error?: { message?: string; code?: string } };
-
-function isJobSnapshot(payload: unknown): payload is IngestJobSnapshot {
-  return (
-    typeof payload === "object" &&
-    payload !== null &&
-    "batchId" in payload &&
-    "status" in payload
-  );
-}
-
-function getErrorMessage(
-  payload: ErrorPayload | unknown,
-  fallback: string,
-): string {
-  if (payload && typeof payload === "object" && "error" in payload) {
-    const error = (payload as ErrorPayload).error;
-    if (typeof error === "string" && error.trim()) return error;
-    if (
-      error &&
-      typeof error === "object" &&
-      "message" in error &&
-      typeof error.message === "string" &&
-      error.message.trim()
-    ) {
-      return error.message;
-    }
-  }
-  return fallback;
-}
-
-async function safeReadJson(response: Response): Promise<unknown> {
-  const text = await response.text();
-  try {
-    return JSON.parse(text);
-  } catch {
-    return { error: text.slice(0, 400) || `HTTP ${response.status}` };
-  }
-}
-
-function mergeIngestResults(
-  left: ManualIngestResult,
-  right: ManualIngestResult,
-): ManualIngestResult {
-  return {
-    packages: [...left.packages, ...right.packages],
-    transcriptions: [...left.transcriptions, ...right.transcriptions],
-    metadata: [...left.metadata, ...right.metadata],
-    transcriptionErrors: [
-      ...left.transcriptionErrors,
-      ...right.transcriptionErrors,
-    ],
-  };
 }
 
 function validateFiles(files: File[], blobReady: boolean): string | null {
