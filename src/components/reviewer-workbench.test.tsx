@@ -8,6 +8,7 @@ import {
   sampleMetadata,
   sampleTranscription,
 } from "@/lib/edison/sample-data";
+import type { DocumentPackage, SourceGroup } from "@/lib/edison/types";
 
 // The workbench calls `useRouter()` to refresh after split edits. The test
 // environment doesn't mount an app-router context, so we stub the hook to a
@@ -32,6 +33,88 @@ const transcriptionsById = {
 const metadataById = {
   [sampleMetadata.documentId]: sampleMetadata,
 };
+
+const multiFileGroup: SourceGroup = {
+  groupId: "GROUP-A",
+  originalFileName: "batch.pdf",
+  position: 0,
+  siblingIds: ["DOC-A", "DOC-A-1", "DOC-A-2"],
+  totalPages: 6,
+};
+
+function makeReviewDoc(
+  documentId: string,
+  title: string,
+  sourceGroup?: SourceGroup,
+): DocumentPackage {
+  return {
+    id: documentId,
+    folderId: "F1",
+    documentId,
+    title,
+    sourceFile: {
+      id: `file-${documentId}`,
+      name: `${documentId}.pdf`,
+      size: 1000,
+      mimeType: "application/pdf",
+    },
+    pages: [
+      {
+        id: `${documentId}-page-1`,
+        documentId,
+        pageIndex: 0,
+        imageFilename: `${documentId}/page1.jpg`,
+        sourcePage: 1,
+      },
+    ],
+    status: "needs_review",
+    confidence: "medium",
+    validationWarnings: [],
+    uncertaintyNotes: [],
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+    sourceGroup,
+  };
+}
+
+const multiFileDocuments = [
+  makeReviewDoc("DOC-A", "First letter", {
+    ...multiFileGroup,
+    position: 0,
+  }),
+  makeReviewDoc("DOC-A-1", "Second letter", {
+    ...multiFileGroup,
+    position: 1,
+  }),
+  makeReviewDoc("DOC-A-2", "Third letter", {
+    ...multiFileGroup,
+    position: 2,
+  }),
+  makeReviewDoc("DOC-B", "Other file document"),
+];
+
+const multiFileTranscriptions = Object.fromEntries(
+  multiFileDocuments.map((doc) => [
+    doc.documentId,
+    {
+      ...sampleTranscription,
+      id: `${doc.documentId}-transcription`,
+      documentId: doc.documentId,
+      diplomaticText: `Text for ${doc.documentId}`,
+    },
+  ]),
+);
+
+const multiFileMetadata = Object.fromEntries(
+  multiFileDocuments.map((doc) => [
+    doc.documentId,
+    {
+      ...sampleMetadata,
+      documentId: doc.documentId,
+      title: doc.title,
+    },
+  ]),
+);
 
 describe("ReviewerWorkbench", () => {
   it("renders document identifiers and editable transcription", () => {
@@ -126,5 +209,43 @@ describe("ReviewerWorkbench", () => {
     );
     expect(routerMocks.push).toHaveBeenCalledWith("/review");
     expect(routerMocks.refresh).toHaveBeenCalled();
+  });
+
+  it("advances Next to the next file, not the next sibling", async () => {
+    const user = userEvent.setup();
+    routerMocks.push.mockClear();
+
+    render(
+      <ReviewerWorkbench
+        documents={multiFileDocuments}
+        transcriptions={multiFileTranscriptions}
+        metadata={multiFileMetadata}
+        initialDocumentId="DOC-A-1"
+      />,
+    );
+
+    expect(
+      screen.getByRole("heading", { name: "Second letter" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/1 of 2/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /^next$/i }));
+
+    expect(routerMocks.push).toHaveBeenCalledWith(
+      "/review?doc=DOC-B",
+    );
+  });
+
+  it("shows file count in queue position when siblings share one source file", () => {
+    render(
+      <ReviewerWorkbench
+        documents={multiFileDocuments}
+        transcriptions={multiFileTranscriptions}
+        metadata={multiFileMetadata}
+        initialDocumentId="DOC-A-2"
+      />,
+    );
+
+    expect(screen.getByText(/1 of 2/)).toBeInTheDocument();
   });
 });

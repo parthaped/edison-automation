@@ -17,6 +17,11 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { DocumentViewer } from "@/components/document-viewer";
 import { Button } from "@/components/ui/button";
+import {
+  buildFileNavUnits,
+  fileIndexForDocument,
+  leadDocumentIdForFileIndex,
+} from "@/lib/edison/review-navigation";
 import type {
   ConfidenceBucket,
   DocumentPackage,
@@ -86,6 +91,21 @@ export function ReviewerWorkbench({
   >(null);
   const [deleting, setDeleting] = useState(false);
 
+  const fileNavUnits = useMemo(
+    () => buildFileNavUnits(documents),
+    [documents],
+  );
+
+  useEffect(() => {
+    if (!initialDocumentId) return;
+    const index = documents.findIndex(
+      (doc) => doc.documentId === initialDocumentId,
+    );
+    if (index >= 0) {
+      setActiveIndex(index);
+    }
+  }, [initialDocumentId, documents]);
+
   const activeDocument = documents[activeIndex] ?? documents[0];
   const deleteConfirming =
     deleteConfirmingForId === activeDocument?.documentId;
@@ -103,16 +123,25 @@ export function ReviewerWorkbench({
     );
   }
 
-  const queuePosition = `${activeIndex + 1} of ${documents.length}`;
+  const activeFileIndex = fileIndexForDocument(
+    fileNavUnits,
+    activeDocument.documentId,
+  );
+  const queuePosition = `${activeFileIndex + 1} of ${fileNavUnits.length}`;
   const transcription =
     transcriptions[activeDocument.documentId] ??
     emptyTranscription(activeDocument.documentId);
   const activeMetadata =
     metadata[activeDocument.documentId] ?? emptyMetadata(activeDocument);
 
-  function goToDocument(index: number) {
-    const next = Math.max(0, Math.min(index, documents.length - 1));
-    setActiveIndex(next);
+  function goToFile(fileIndex: number) {
+    const leadId = leadDocumentIdForFileIndex(fileNavUnits, fileIndex);
+    if (!leadId) return;
+    const index = documents.findIndex((doc) => doc.documentId === leadId);
+    if (index >= 0) {
+      setActiveIndex(index);
+    }
+    router.push(`/review?doc=${encodeURIComponent(leadId)}`);
   }
 
   const isApproved =
@@ -147,8 +176,8 @@ export function ReviewerWorkbench({
         return next;
       });
       toast.success("Document approved for export.");
-      if (activeIndex < documents.length - 1) {
-        goToDocument(activeIndex + 1);
+      if (activeFileIndex < fileNavUnits.length - 1) {
+        goToFile(activeFileIndex + 1);
       }
     } catch (error) {
       toast.error("Could not approve document", {
@@ -294,13 +323,13 @@ export function ReviewerWorkbench({
           </Button>
           <NavButton
             direction="prev"
-            onClick={() => goToDocument(activeIndex - 1)}
-            disabled={activeIndex === 0}
+            onClick={() => goToFile(activeFileIndex - 1)}
+            disabled={activeFileIndex <= 0}
           />
           <NavButton
             direction="next"
-            onClick={() => goToDocument(activeIndex + 1)}
-            disabled={activeIndex === documents.length - 1}
+            onClick={() => goToFile(activeFileIndex + 1)}
+            disabled={activeFileIndex >= fileNavUnits.length - 1}
           />
         </div>
       </header>
