@@ -29,6 +29,12 @@ export default async function ReviewPage({ searchParams }: ReviewPageProps) {
         {reviewCase ? (
           <div className="p-4 sm:p-6">
             <ReviewerWorkbench
+              key={
+                doc &&
+                reviewCase.documents.some((d) => d.documentId === doc)
+                  ? doc
+                  : reviewCase.selectedDocumentId
+              }
               documents={reviewCase.documents}
               transcriptions={reviewCase.transcriptions}
               metadata={reviewCase.metadata}

@@ -79,11 +79,10 @@ export function ReviewerWorkbench({
   initialDocumentId,
 }: ReviewerWorkbenchProps) {
   const router = useRouter();
-  const initialIndex = Math.max(
+  const activeIndex = Math.max(
     0,
     documents.findIndex((doc) => doc.documentId === initialDocumentId),
   );
-  const [activeIndex, setActiveIndex] = useState(initialIndex);
   const [approvedIds, setApprovedIds] = useState<Set<string>>(new Set());
   const [approving, setApproving] = useState(false);
   const [deleteConfirmingForId, setDeleteConfirmingForId] = useState<
@@ -95,16 +94,6 @@ export function ReviewerWorkbench({
     () => buildFileNavUnits(documents),
     [documents],
   );
-
-  useEffect(() => {
-    if (!initialDocumentId) return;
-    const index = documents.findIndex(
-      (doc) => doc.documentId === initialDocumentId,
-    );
-    if (index >= 0) {
-      setActiveIndex(index);
-    }
-  }, [initialDocumentId, documents]);
 
   const activeDocument = documents[activeIndex] ?? documents[0];
   const deleteConfirming =
@@ -137,10 +126,6 @@ export function ReviewerWorkbench({
   function goToFile(fileIndex: number) {
     const leadId = leadDocumentIdForFileIndex(fileNavUnits, fileIndex);
     if (!leadId) return;
-    const index = documents.findIndex((doc) => doc.documentId === leadId);
-    if (index >= 0) {
-      setActiveIndex(index);
-    }
     router.push(`/review?doc=${encodeURIComponent(leadId)}`);
   }
 
