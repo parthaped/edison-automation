@@ -126,8 +126,8 @@ describe("ReviewerWorkbench", () => {
       />,
     );
 
-    expect(screen.getByText("D9032-F")).toBeInTheDocument();
-    expect(screen.getAllByText("D9032-00001").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("E2002").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("E2002AAA").length).toBeGreaterThanOrEqual(1);
     expect(
       (screen.getByLabelText("Body text") as HTMLTextAreaElement).value,
     ).toContain("[filament?]");
@@ -172,7 +172,7 @@ describe("ReviewerWorkbench", () => {
     );
 
     const link = screen.getByRole("link", { name: /open standalone/i });
-    expect(link).toHaveAttribute("href", "/viewer/D9032-00001");
+    expect(link).toHaveAttribute("href", "/viewer/E2002AAA");
   });
 
   it("shows a remove control for mistakenly uploaded files", async () => {
@@ -204,7 +204,7 @@ describe("ReviewerWorkbench", () => {
     await user.click(screen.getByRole("button", { name: /confirm remove/i }));
 
     expect(fetch).toHaveBeenCalledWith(
-      "/api/documents/D9032-00001",
+      "/api/documents/E2002AAA",
       expect.objectContaining({ method: "DELETE" }),
     );
     expect(routerMocks.push).toHaveBeenCalledWith("/review");
@@ -247,5 +247,39 @@ describe("ReviewerWorkbench", () => {
     );
 
     expect(screen.getByText(/1 of 2/)).toBeInTheDocument();
+  });
+
+  it("removes the approved file from the local queue and advances to the next file", async () => {
+    const user = userEvent.setup();
+    routerMocks.push.mockClear();
+    routerMocks.refresh.mockClear();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ ok: true }),
+      }),
+    );
+
+    render(
+      <ReviewerWorkbench
+        documents={multiFileDocuments}
+        transcriptions={multiFileTranscriptions}
+        metadata={multiFileMetadata}
+        initialDocumentId="DOC-A"
+      />,
+    );
+
+    // The first file (DOC-A and its siblings) sits at position 1 of 2.
+    expect(screen.getByText(/1 of 2/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /^approve & next$/i }));
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/documents/DOC-A",
+      expect.objectContaining({ method: "PATCH" }),
+    );
+    expect(routerMocks.push).toHaveBeenCalledWith("/review?doc=DOC-B");
+    expect(routerMocks.refresh).toHaveBeenCalled();
   });
 });

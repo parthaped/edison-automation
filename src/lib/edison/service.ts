@@ -1,5 +1,10 @@
 import { AppError } from "./app-error";
-import { buildAuditTrail, type AuditEvent } from "./audit";
+import {
+  InMemoryAuditLog,
+  type AuditEvent,
+  type AuditEventType,
+  type AuditLog,
+} from "./audit-log";
 import { extractUncertainReadings, gradeTranscription } from "./confidence";
 import {
   buildPageManifestForRange,
@@ -12,6 +17,9 @@ import { buildTaepIndexCsv, buildTaepIndexRow } from "./export-taep-index";
 import {
   appendSubDocumentSuffix,
   assignDocumentId,
+  buildDocumentId,
+  defaultFolderIdFromFileName,
+  findNextAvailablePosition,
   normalizeFolderId,
 } from "./id-policy";
 import {
@@ -355,7 +363,7 @@ export async function processSourceFileSubDocuments(
     (await createExtractionPlan(input.sourceFile, input.bytes));
   const folderId = input.folderId
     ? normalizeFolderId(input.folderId)
-    : "UNASSIGNED-F";
+    : defaultFolderIdFromFileName(input.sourceFile.name);
   const baseAssignment = assignDocumentId({
     folderId,
     providedDocumentId: input.providedDocumentId,
@@ -427,7 +435,7 @@ export async function processSourceFileSubDocuments(
     const documentId = siblingIds[position];
     const pages = buildPageManifestForRange(
       documentId,
-      input.sourceFile.name,
+      folderId,
       sub.startPage,
       sub.endPage,
     ).map((page) => {
@@ -586,10 +594,36 @@ export function normalizeSubDocuments(
 }
 
 export class EdisonAutomationService {
-  constructor(private readonly repository: EdisonRepository) {}
+  private readonly auditLog: AuditLog;
+
+  constructor(
+    private readonly repository: EdisonRepository,
+    auditLog: AuditLog = new InMemoryAuditLog(),
+  ) {
+    this.auditLog = auditLog;
+  }
 
   getRepository(): EdisonRepository {
     return this.repository;
+  }
+
+  getAuditLog(): AuditLog {
+    return this.auditLog;
+  }
+
+  private async emit(event: Omit<AuditEvent, "id" | "timestamp"> & {
+    timestamp?: string;
+  }): Promise<void> {
+    try {
+      await this.auditLog.append({
+        ...event,
+        timestamp: event.timestamp ?? new Date().toISOString(),
+      });
+    } catch (error) {
+      // Audit is best-effort; never let a logging failure roll back the
+      // surrounding mutation. Surface to the server log instead.
+      console.error("Failed to append audit event", event.type, error);
+    }
   }
 
   async getDashboard(): Promise<{ summary: DashboardSummary }> {
@@ -638,9 +672,41 @@ export class EdisonAutomationService {
     return this.repository.getDocumentRecord(documentId);
   }
 
-  async getAuditTrail(): Promise<AuditEvent[]> {
+  async getAuditTrail(opts?: {
+    limit?: number;
+    types?: AuditEventType[];
+    documentId?: string;
+    scope?: "all" | "active" | "past";
+  }): Promise<AuditEvent[]> {
+    const events = await this.auditLog.list({
+      limit: opts?.limit,
+      types: opts?.types,
+      documentId: opts?.documentId,
+    });
+    if (!opts?.scope || opts.scope === "all") return events;
+
+    // For the active/past scope filter we need to know each event's
+    // *current* document status, not the status at the time of the event.
     const records = await this.repository.listDocumentRecords();
-    return buildAuditTrail(records);
+    const statusById = new Map<string, string>();
+    for (const document of records.documents) {
+      statusById.set(document.documentId, document.status);
+    }
+    return events.filter((event) => {
+      if (!event.documentId) return opts.scope === "all";
+      const status = statusById.get(event.documentId);
+      const isPast = status === "approved" || status === "exported";
+      return opts.scope === "past" ? isPast : !isPast;
+    });
+  }
+
+  async getApprovedDocuments(pagination?: {
+    offset?: number;
+    limit?: number;
+  }) {
+    const limit = pagination?.limit ?? 50;
+    const offset = pagination?.offset ?? 0;
+    return this.repository.listApprovedDocumentsPage({ offset, limit });
   }
 
   async getGroupSiblings(groupId: string) {
@@ -717,7 +783,7 @@ export class EdisonAutomationService {
 
       const pages = buildPageManifestForRange(
         documentId,
-        sourceFile.name,
+        folderId,
         split.startPage,
         split.endPage,
       ).map((page) => {
@@ -790,10 +856,40 @@ export class EdisonAutomationService {
     });
 
     await this.repository.replaceGroupSiblings(groupId, nextRecords);
+
+    const previousById = new Map(
+      siblings.map((sibling) => [sibling.document.documentId, sibling]),
+    );
+    for (const next of nextRecords) {
+      const previous = previousById.get(next.document.documentId);
+      const oldRange = previous
+        ? rangeLabel(previous.document)
+        : "(new sibling)";
+      const newRange = rangeLabel(next.document);
+      await this.emit({
+        type: "splits_changed",
+        documentId: next.document.documentId,
+        folderId: next.document.folderId,
+        title: next.document.title,
+        detail: `Pages ${oldRange} → ${newRange}`,
+        metadata: {
+          groupId,
+          previousRange: oldRange,
+          newRange,
+          totalSiblings: nextRecords.length,
+        },
+      });
+    }
+
     return nextRecords;
   }
 
   async saveTranscriptionEdit(documentId: string, diplomaticText: string) {
+    const record = await this.repository.getDocumentRecord(documentId);
+    if (!record) {
+      throw new AppError("NOT_FOUND", "Document was not found.", 404);
+    }
+    const previousLength = record.transcription.diplomaticText.length;
     const updated = await this.repository.updateTranscriptionText(
       documentId,
       diplomaticText,
@@ -801,6 +897,18 @@ export class EdisonAutomationService {
     if (!updated) {
       throw new AppError("NOT_FOUND", "Document was not found.", 404);
     }
+    await this.emit({
+      type: "text_edited",
+      documentId,
+      folderId: updated.folderId,
+      title: updated.title,
+      detail: `${diplomaticText.length} characters (${signedDelta(diplomaticText.length - previousLength)})`,
+      metadata: {
+        previousLength,
+        newLength: diplomaticText.length,
+        delta: diplomaticText.length - previousLength,
+      },
+    });
     return updated;
   }
 
@@ -809,6 +917,7 @@ export class EdisonAutomationService {
     if (!record) {
       throw new AppError("NOT_FOUND", "Document was not found.", 404);
     }
+    const previousComments = record.metadata.comments ?? "";
     const metadata = normalizeMetadata({
       ...record.metadata,
       comments: comments.trim() || undefined,
@@ -818,6 +927,20 @@ export class EdisonAutomationService {
       record.transcription,
       metadata,
     );
+    await this.emit({
+      type: "comments_edited",
+      documentId,
+      folderId: record.document.folderId,
+      title: record.document.title,
+      detail:
+        comments.trim().length > 0
+          ? `${comments.trim().length} characters`
+          : "Comments cleared",
+      metadata: {
+        previousComments,
+        newComments: metadata.comments ?? "",
+      },
+    });
     return metadata;
   }
 
@@ -838,14 +961,204 @@ export class EdisonAutomationService {
     if (!updated) {
       throw new AppError("NOT_FOUND", "Document was not found.", 404);
     }
+    await this.emit({
+      type: "approved",
+      documentId,
+      folderId: updated.folderId,
+      title: updated.title,
+      confidence: updated.confidence,
+      status: updated.status,
+      detail: `Approved for export (was ${record.document.status})`,
+      metadata: { previousStatus: record.document.status },
+    });
+    return updated;
+  }
+
+  async unapproveDocument(documentId: string) {
+    const record = await this.repository.getDocumentRecord(documentId);
+    if (!record) {
+      throw new AppError("NOT_FOUND", "Document was not found.", 404);
+    }
+    if (record.document.status !== "approved") {
+      throw new AppError(
+        "BAD_REQUEST",
+        "Only approved documents can be sent back to review.",
+        409,
+      );
+    }
+    const updated = await this.repository.unapproveDocument(documentId);
+    if (!updated) {
+      throw new AppError("NOT_FOUND", "Document was not found.", 404);
+    }
+    await this.emit({
+      type: "unapproved",
+      documentId,
+      folderId: updated.folderId,
+      title: updated.title,
+      confidence: updated.confidence,
+      status: updated.status,
+      detail: "Sent back to review queue",
+      metadata: { previousStatus: "approved" },
+    });
     return updated;
   }
 
   async deleteDocument(documentId: string) {
+    const record = await this.repository.getDocumentRecord(documentId);
     const deleted = await this.repository.deleteDocument(documentId);
     if (!deleted) {
       throw new AppError("NOT_FOUND", "Document was not found.", 404);
     }
+    await this.emit({
+      type: "deleted",
+      documentId,
+      folderId: record?.document.folderId,
+      title: record?.document.title,
+      detail: record
+        ? `Removed ${record.document.pages.length} page(s) from ${record.document.sourceFile.name}`
+        : "Document removed",
+      metadata: record
+        ? {
+            previousStatus: record.document.status,
+            sourceFile: record.document.sourceFile.name,
+          }
+        : undefined,
+    });
+  }
+
+  /**
+   * Renames the folder id for a single document or, when the document belongs
+   * to a `sourceGroup`, rebuilds every sibling under the new folder. The new
+   * folder id is normalized via `normalizeFolderId`, and resulting doc ids
+   * must not collide with documents outside this group.
+   */
+  async renameFolderId(documentId: string, newFolderId: string) {
+    const normalizedFolder = normalizeFolderId(newFolderId);
+    if (normalizedFolder.length === 0) {
+      throw new AppError(
+        "BAD_REQUEST",
+        "Folder ID must contain at least one letter or digit.",
+        400,
+      );
+    }
+    const record = await this.repository.getDocumentRecord(documentId);
+    if (!record) {
+      throw new AppError("NOT_FOUND", "Document was not found.", 404);
+    }
+    const previousFolder = record.document.folderId;
+    if (previousFolder === normalizedFolder) {
+      return [record];
+    }
+
+    const isGrouped = Boolean(record.document.sourceGroup);
+    const siblings = isGrouped
+      ? await this.repository.listGroupSiblings(record.document.sourceGroup!.groupId)
+      : [record];
+
+    // Build a set of existing IDs excluding the ones we're about to rename so
+    // we can detect collisions with unrelated records under the new folder.
+    const existingIds = new Set(await this.repository.listDocumentIds());
+    for (const sibling of siblings) {
+      existingIds.delete(sibling.document.documentId);
+    }
+
+    const basePosition = findNextAvailablePosition(
+      normalizedFolder,
+      existingIds,
+    );
+    const baseId = buildDocumentId(normalizedFolder, basePosition);
+    const newIds = siblings.map((_, index) =>
+      appendSubDocumentSuffix(baseId, index),
+    );
+
+    // Verify the generated ids are themselves disjoint from existing records.
+    for (const candidate of newIds) {
+      if (existingIds.has(candidate)) {
+        throw new AppError(
+          "BAD_REQUEST",
+          `Cannot rename: a document already exists with id "${candidate}" under the new folder.`,
+          409,
+        );
+      }
+    }
+
+    const now = new Date().toISOString();
+    const renamed = siblings.map((sibling, index) => {
+      const newId = newIds[index];
+      const oldId = sibling.document.documentId;
+      const oldTitle = sibling.document.title;
+      const updatedTitle = oldTitle.startsWith(`[${oldId}]`)
+        ? `[${newId}]${oldTitle.slice(`[${oldId}]`.length)}`
+        : oldTitle;
+      const updatedPages = sibling.document.pages.map((page, pageIndex) => ({
+        ...page,
+        id: `${newId}-page-${pageIndex + 1}`,
+        documentId: newId,
+      }));
+      const updatedSourceGroup = sibling.document.sourceGroup
+        ? {
+            ...sibling.document.sourceGroup,
+            groupId: newIds[0],
+            siblingIds: newIds,
+          }
+        : undefined;
+
+      return {
+        document: {
+          ...sibling.document,
+          id: newId,
+          documentId: newId,
+          folderId: normalizedFolder,
+          title: updatedTitle,
+          pages: updatedPages,
+          updatedAt: now,
+          ...(updatedSourceGroup ? { sourceGroup: updatedSourceGroup } : {}),
+        },
+        transcription: {
+          ...sibling.transcription,
+          id: `${newId}-run-1`,
+          documentId: newId,
+        },
+        metadata: {
+          ...sibling.metadata,
+          documentId: newId,
+          folderId: normalizedFolder,
+        },
+      };
+    });
+
+    if (isGrouped && record.document.sourceGroup) {
+      await this.repository.replaceGroupSiblings(
+        record.document.sourceGroup.groupId,
+        renamed,
+      );
+    } else {
+      // Standalone document: write the new record, then delete the old one.
+      const next = renamed[0];
+      await this.repository.saveProcessedDocument(
+        next.document,
+        next.transcription,
+        next.metadata,
+      );
+      await this.repository.deleteDocument(documentId);
+    }
+
+    for (const sibling of renamed) {
+      await this.emit({
+        type: "folder_renamed",
+        documentId: sibling.document.documentId,
+        folderId: normalizedFolder,
+        title: sibling.document.title,
+        detail: `${previousFolder} → ${normalizedFolder}`,
+        metadata: {
+          previousFolderId: previousFolder,
+          newFolderId: normalizedFolder,
+          previousDocumentId: siblings[renamed.indexOf(sibling)].document.documentId,
+        },
+      });
+    }
+
+    return renamed;
   }
 
   async buildBatchExportFromPayload(
@@ -892,6 +1205,33 @@ export class EdisonAutomationService {
       rows.map((row) => buildExportCsvRow(row.metadata, row.transcription)),
     );
   }
+
+  /**
+   * Builds the Omeka transcriptions CSV for a single approved document.
+   * Used by the Past verifications tab's per-row download action.
+   */
+  async exportSingleTranscriptionCsv(documentId: string): Promise<string> {
+    const record = await this.repository.getDocumentRecord(documentId);
+    if (!record) {
+      throw new AppError("NOT_FOUND", "Document was not found.", 404);
+    }
+    return buildExportCsv([
+      buildExportCsvRow(record.metadata, record.transcription),
+    ]);
+  }
+}
+
+function rangeLabel(document: DocumentPackage): string {
+  const pages = document.pages;
+  if (pages.length === 0) return "-";
+  const start = pages[0].sourcePage;
+  const end = pages[pages.length - 1].sourcePage;
+  return start === end ? `${start}` : `${start}-${end}`;
+}
+
+function signedDelta(value: number): string {
+  if (value === 0) return "±0";
+  return value > 0 ? `+${value}` : `${value}`;
 }
 
 async function buildBatchZip(rows: BatchExportRow[]): Promise<{

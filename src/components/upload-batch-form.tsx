@@ -186,15 +186,23 @@ export function UploadBatchForm({ blobReady }: UploadBatchFormProps) {
                 id={folderInputId}
                 name="folderId"
                 type="text"
-                placeholder="D9032-F"
+                placeholder="E2002"
                 className="mt-2 block h-9 w-full rounded-md border border-border bg-background px-3 text-sm text-foreground outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
               />
               <p className="mt-2 text-[12px] text-muted-foreground">
-                Optional. Used to mint Doc IDs like
-                <code className="ml-1 rounded-sm bg-muted px-1 py-0.5 font-mono text-[11px]">
-                  D9032-00001
+                Leave blank to use each file&apos;s name as its folder (e.g.
+                <code className="mx-1 rounded-sm bg-muted px-1 py-0.5 font-mono text-[11px]">
+                  E2002.pdf
                 </code>
-                .
+                {"\u2192"} folder
+                <code className="mx-1 rounded-sm bg-muted px-1 py-0.5 font-mono text-[11px]">
+                  E2002
+                </code>
+                , doc
+                <code className="mx-1 rounded-sm bg-muted px-1 py-0.5 font-mono text-[11px]">
+                  E2002AAA
+                </code>
+                ). You can rename it from the Review tab afterwards.
               </p>
             </div>
             <div>

@@ -159,16 +159,13 @@ function ConfidenceCounts({
     readyToExport: number;
   };
 }) {
+  // Note: "Ready / approved" is now its own tab. The badge here links to
+  // Past verifications so the count is still discoverable from review.
   const cells: Array<{ label: string; count: number; dot: string }> = [
     { label: "High", count: summary.highConfidence, dot: "bg-emerald-500" },
     { label: "Medium", count: summary.mediumConfidence, dot: "bg-amber-500" },
     { label: "Low", count: summary.lowConfidence, dot: "bg-rose-500" },
     { label: "Blocked", count: summary.blocked, dot: "bg-slate-400" },
-    {
-      label: "Ready",
-      count: summary.readyToExport,
-      dot: "bg-sky-500",
-    },
   ];
   return (
     <dl className="flex items-center gap-4">
@@ -186,6 +183,16 @@ function ConfidenceCounts({
           </dd>
         </div>
       ))}
+      <Link
+        href="/past"
+        className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-2.5 py-1 text-[11px] uppercase tracking-wide text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+      >
+        <span aria-hidden="true" className="inline-block h-1.5 w-1.5 rounded-full bg-sky-500" />
+        Approved (lifetime)
+        <span className="font-mono text-[12px] font-semibold tabular-nums text-foreground">
+          {summary.readyToExport}
+        </span>
+      </Link>
     </dl>
   );
 }

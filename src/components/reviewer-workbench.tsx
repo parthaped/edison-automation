@@ -7,9 +7,11 @@ import {
   ChevronRight,
   ExternalLink,
   Loader2,
+  Pencil,
   Plus,
   Scissors,
   Trash2,
+  X,
 } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
@@ -75,17 +77,37 @@ function emptyMetadata(document: DocumentPackage): MetadataExtraction {
 }
 
 export function ReviewerWorkbench({
-  documents,
+  documents: initialDocuments,
   transcriptions,
   metadata,
   initialDocumentId,
 }: ReviewerWorkbenchProps) {
   const router = useRouter();
-  const activeIndex = Math.max(
-    0,
-    documents.findIndex((doc) => doc.documentId === initialDocumentId),
+  // The list of documents the reviewer is working through. We lift it to
+  // state so approve/remove can shrink the queue without waiting for a
+  // round-trip to the server, and Next can be advanced to the next file
+  // immediately. Server-side data still drives the *initial* set.
+  const [documents, setDocuments] = useState<DocumentPackage[]>(initialDocuments);
+  const [prevInitialDocuments, setPrevInitialDocuments] =
+    useState<DocumentPackage[]>(initialDocuments);
+  if (initialDocuments !== prevInitialDocuments) {
+    // React 19 derived-state pattern: re-sync local queue when the server
+    // hands us a new prop reference (e.g. after router.refresh()).
+    setPrevInitialDocuments(initialDocuments);
+    setDocuments(initialDocuments);
+  }
+
+  const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(
+    initialDocumentId ?? null,
   );
-  const [approvedIds, setApprovedIds] = useState<Set<string>>(new Set());
+  const [prevInitialDocumentId, setPrevInitialDocumentId] = useState<
+    string | undefined
+  >(initialDocumentId);
+  if (initialDocumentId !== prevInitialDocumentId) {
+    setPrevInitialDocumentId(initialDocumentId);
+    if (initialDocumentId) setSelectedDocumentId(initialDocumentId);
+  }
+
   const [approving, setApproving] = useState(false);
   const [deleteConfirmingForId, setDeleteConfirmingForId] = useState<
     string | null
@@ -93,12 +115,18 @@ export function ReviewerWorkbench({
   const [commentDrafts, setCommentDrafts] = useState<Record<string, string>>({});
   const [savingComments, setSavingComments] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [renamingFolder, setRenamingFolder] = useState(false);
+  const [folderDraft, setFolderDraft] = useState<string | null>(null);
 
   const fileNavUnits = useMemo(
     () => buildFileNavUnits(documents),
     [documents],
   );
 
+  const activeIndex = Math.max(
+    0,
+    documents.findIndex((doc) => doc.documentId === selectedDocumentId),
+  );
   const activeDocument = documents[activeIndex] ?? documents[0];
 
   const deleteConfirming =
@@ -108,10 +136,14 @@ export function ReviewerWorkbench({
     return (
       <div className="border border-dashed border-border bg-card px-6 py-12 text-center">
         <h3 className="text-lg font-semibold text-foreground">
-          No reviewable documents
+          No documents to review
         </h3>
         <p className="mt-2 text-sm text-muted-foreground">
-          New documents will appear here after ingest and extraction complete.
+          Approved documents move to the{" "}
+          <Link href="/past" className="underline">
+            Past verifications
+          </Link>{" "}
+          tab. New uploads will appear here after ingest completes.
         </p>
       </div>
     );
@@ -135,17 +167,30 @@ export function ReviewerWorkbench({
   function goToFile(fileIndex: number) {
     const leadId = leadDocumentIdForFileIndex(fileNavUnits, fileIndex);
     if (!leadId) return;
+    setSelectedDocumentId(leadId);
     router.push(`/review?doc=${encodeURIComponent(leadId)}`);
   }
 
-  const isApproved =
-    activeDocument.status === "approved" ||
-    approvedIds.has(activeDocument.documentId);
   const isBlocked = activeDocument.status === "blocked";
-  const effectiveStatus = isApproved ? "approved" : activeDocument.status;
+  const effectiveStatus = activeDocument.status;
+
+  // Drops every sibling that belongs to the same source file as
+  // `documentId` from the local queue, so approving one sibling clears the
+  // whole file from review at once (the user is moved on to the next file).
+  function removeFileFromQueue(documentId: string) {
+    const target = documents.find((doc) => doc.documentId === documentId);
+    const groupId = target?.sourceGroup?.groupId;
+    setDocuments((current) =>
+      current.filter((doc) => {
+        if (doc.documentId === documentId) return false;
+        if (groupId && doc.sourceGroup?.groupId === groupId) return false;
+        return true;
+      }),
+    );
+  }
 
   async function handleApprove() {
-    if (approving || isApproved || isBlocked) return;
+    if (approving || isBlocked) return;
     setApproving(true);
     try {
       const response = await fetch(
@@ -164,21 +209,71 @@ export function ReviewerWorkbench({
           data?.error?.message ?? `Approval failed (${response.status}).`,
         );
       }
-      setApprovedIds((prev) => {
-        const next = new Set(prev);
-        next.add(activeDocument.documentId);
-        return next;
-      });
-      toast.success("Document approved for export.");
-      if (activeFileIndex < fileNavUnits.length - 1) {
-        goToFile(activeFileIndex + 1);
+      toast.success("Document approved · moved to Past verifications.");
+      const nextFileLeadId = leadDocumentIdForFileIndex(
+        fileNavUnits,
+        activeFileIndex + 1,
+      );
+      const approvedDocumentId = activeDocument.documentId;
+      removeFileFromQueue(approvedDocumentId);
+      if (nextFileLeadId) {
+        setSelectedDocumentId(nextFileLeadId);
+        router.push(`/review?doc=${encodeURIComponent(nextFileLeadId)}`);
+      } else {
+        setSelectedDocumentId(null);
+        router.push("/review");
       }
+      // Refresh so the dashboard counts and the paginated review window
+      // reload with the new state (e.g. next page of documents fills in).
+      router.refresh();
     } catch (error) {
       toast.error("Could not approve document", {
         description: error instanceof Error ? error.message : String(error),
       });
     } finally {
       setApproving(false);
+    }
+  }
+
+  async function handleSaveFolderId() {
+    const target = folderDraft?.trim();
+    if (!target || target === activeDocument.folderId) {
+      setFolderDraft(null);
+      return;
+    }
+    setRenamingFolder(true);
+    try {
+      const response = await fetch(
+        `/api/documents/${encodeURIComponent(activeDocument.documentId)}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ folderId: target }),
+        },
+      );
+      if (!response.ok) {
+        const data = (await response.json().catch(() => null)) as
+          | { error?: { message?: string } }
+          | null;
+        throw new Error(
+          data?.error?.message ?? `Rename failed (${response.status}).`,
+        );
+      }
+      const body = (await response.json()) as {
+        document: DocumentPackage;
+      };
+      const newDocumentId = body.document.documentId;
+      toast.success(`Folder renamed · ${activeDocument.folderId} → ${body.document.folderId}`);
+      setFolderDraft(null);
+      setSelectedDocumentId(newDocumentId);
+      router.push(`/review?doc=${encodeURIComponent(newDocumentId)}`);
+      router.refresh();
+    } catch (error) {
+      toast.error("Could not rename folder", {
+        description: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      setRenamingFolder(false);
     }
   }
 
@@ -244,14 +339,16 @@ export function ReviewerWorkbench({
       const remaining = documents.filter(
         (document) => document.documentId !== activeDocument.documentId,
       );
+      setDocuments(remaining);
       setDeleteConfirmingForId(null);
       if (remaining.length === 0) {
+        setSelectedDocumentId(null);
         router.push("/review");
       } else {
         const nextIndex = Math.min(activeIndex, remaining.length - 1);
-        router.push(
-          `/review?doc=${encodeURIComponent(remaining[nextIndex].documentId)}`,
-        );
+        const nextId = remaining[nextIndex].documentId;
+        setSelectedDocumentId(nextId);
+        router.push(`/review?doc=${encodeURIComponent(nextId)}`);
       }
       router.refresh();
     } catch (error) {
@@ -346,10 +443,10 @@ export function ReviewerWorkbench({
             type="button"
             size="sm"
             onClick={handleApprove}
-            disabled={approving || isApproved || isBlocked}
+            disabled={approving || isBlocked}
           >
             <Check className="h-3.5 w-3.5" strokeWidth={1.8} aria-hidden="true" />
-            {isApproved ? "Approved" : approving ? "Approving…" : "Approve"}
+            {approving ? "Approving…" : "Approve & next"}
           </Button>
           <NavButton
             direction="prev"
@@ -365,7 +462,14 @@ export function ReviewerWorkbench({
       </header>
 
       <div className="border-b border-border px-5 py-4">
-        <InfoBar document={activeDocument} status={effectiveStatus} />
+        <InfoBar
+          document={activeDocument}
+          status={effectiveStatus}
+          folderDraft={folderDraft}
+          renamingFolder={renamingFolder}
+          onFolderDraftChange={setFolderDraft}
+          onSaveFolder={handleSaveFolderId}
+        />
       </div>
 
       <div className="border-b border-border bg-muted/40 p-3">
@@ -488,14 +592,88 @@ function NavButton({
 function InfoBar({
   document,
   status,
+  folderDraft,
+  renamingFolder,
+  onFolderDraftChange,
+  onSaveFolder,
 }: {
   document: DocumentPackage;
   status: DocumentPackage["status"];
+  folderDraft: string | null;
+  renamingFolder: boolean;
+  onFolderDraftChange: (value: string | null) => void;
+  onSaveFolder: () => void;
 }) {
   const statusLabel = status.replaceAll("_", " ");
+  const editing = folderDraft !== null;
   return (
     <dl className="grid grid-cols-2 gap-y-3 text-sm md:grid-cols-4 md:gap-y-0 md:divide-x md:divide-border">
-      <InfoCell label="Folder ID" value={document.folderId} mono />
+      <InfoCell
+        label="Folder ID"
+        valueNode={
+          editing ? (
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                onSaveFolder();
+              }}
+              className="flex items-center gap-1"
+            >
+              <input
+                type="text"
+                value={folderDraft}
+                onChange={(event) => onFolderDraftChange(event.target.value)}
+                aria-label="Folder ID"
+                placeholder="E2002"
+                disabled={renamingFolder}
+                autoFocus
+                className="h-7 w-28 rounded-sm border border-border bg-background px-2 font-mono text-sm text-foreground"
+              />
+              <Button
+                type="submit"
+                size="sm"
+                variant="secondary"
+                disabled={renamingFolder || folderDraft.trim().length === 0}
+              >
+                {renamingFolder ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                ) : (
+                  <Check className="h-3.5 w-3.5" strokeWidth={1.8} aria-hidden="true" />
+                )}
+                Save
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => onFolderDraftChange(null)}
+                disabled={renamingFolder}
+                aria-label="Cancel rename"
+              >
+                <X className="h-3.5 w-3.5" strokeWidth={1.8} aria-hidden="true" />
+              </Button>
+            </form>
+          ) : (
+            <span className="inline-flex items-center gap-1">
+              <span className="break-words font-mono text-sm font-medium text-foreground">
+                {document.folderId}
+              </span>
+              <button
+                type="button"
+                onClick={() => onFolderDraftChange(document.folderId)}
+                aria-label="Edit folder ID"
+                className="inline-flex h-6 w-6 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              >
+                <Pencil
+                  className="h-3 w-3"
+                  strokeWidth={1.8}
+                  aria-hidden="true"
+                />
+              </button>
+            </span>
+          )
+        }
+      />
       <InfoCell label="Document ID" value={document.documentId} mono />
       <InfoCell
         label="Confidence"

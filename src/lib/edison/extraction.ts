@@ -1,6 +1,11 @@
 import { PDFDocument } from "pdf-lib";
 import { validateSourceFile } from "./file-validation";
-import { assignDocumentId, buildImageFilename, normalizeFolderId } from "./id-policy";
+import {
+  assignDocumentId,
+  buildImageFilename,
+  defaultFolderIdFromFileName,
+  normalizeFolderId,
+} from "./id-policy";
 import type { DocumentPackage, PageImage, SourceFile, SupportedFileKind } from "./types";
 
 export interface CreatePackageInput {
@@ -71,14 +76,14 @@ export async function createExtractionPlan(
 
 export function buildPageManifest(
   documentId: string,
-  sourceName: string,
+  folderId: string,
   pageCount: number,
 ): PageImage[] {
   return Array.from({ length: pageCount }, (_, index) => ({
     id: `${documentId}-page-${index + 1}`,
     documentId,
     pageIndex: index,
-    imageFilename: buildImageFilename(documentId, sourceName, index),
+    imageFilename: buildImageFilename(folderId, index + 1),
     sourcePage: index + 1,
   }));
 }
@@ -87,10 +92,11 @@ export function buildPageManifest(
 // the source PDF (pages startPage..endPage, both 1-based inclusive). The
 // returned pages are re-indexed from 0 so the viewer's "page X of N" matches
 // the sub-document, but `sourcePage` preserves the original PDF page number
-// so reviewers can cross-reference back to the source.
+// so reviewers can cross-reference back to the source. `folderId` drives the
+// `<folder>_Page_NN.jpg` naming so siblings of the same PDF share filenames.
 export function buildPageManifestForRange(
   documentId: string,
-  sourceName: string,
+  folderId: string,
   startPage: number,
   endPage: number,
 ): PageImage[] {
@@ -104,7 +110,9 @@ export function buildPageManifestForRange(
     id: `${documentId}-page-${index + 1}`,
     documentId,
     pageIndex: index,
-    imageFilename: buildImageFilename(documentId, sourceName, index),
+    // The image filename refers to the *source* page (so sibling
+    // sub-documents that share an underlying scan reuse the same JPGs).
+    imageFilename: buildImageFilename(folderId, startPage + index),
     sourcePage: startPage + index,
   }));
 }
@@ -112,7 +120,9 @@ export function buildPageManifestForRange(
 export async function createDocumentPackage(
   input: CreatePackageInput,
 ): Promise<DocumentPackage> {
-  const folderId = input.folderId ? normalizeFolderId(input.folderId) : "UNASSIGNED-F";
+  const folderId = input.folderId
+    ? normalizeFolderId(input.folderId)
+    : defaultFolderIdFromFileName(input.sourceFile.name);
   const assigned = assignDocumentId({
     folderId,
     providedDocumentId: input.providedDocumentId,
@@ -129,7 +139,7 @@ export async function createDocumentPackage(
     documentId: assigned.documentId,
     title: `[${assigned.documentId}], ${input.sourceFile.name}`,
     sourceFile: input.sourceFile,
-    pages: buildPageManifest(assigned.documentId, input.sourceFile.name, plan.pageCount),
+    pages: buildPageManifest(assigned.documentId, folderId, plan.pageCount),
     status: plan.blockedReason ? "blocked" : "queued",
     confidence: plan.blockedReason ? "blocked" : "medium",
     validationWarnings: [

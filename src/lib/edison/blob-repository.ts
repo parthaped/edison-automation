@@ -264,6 +264,51 @@ export class BlobEdisonRepository implements EdisonRepository {
     return document;
   }
 
+  async unapproveDocument(documentId: string): Promise<DocumentPackage | null> {
+    const record = await this.readRecord(documentId);
+    if (!record) return null;
+    if (record.document.status !== "approved") return record.document;
+
+    const document: DocumentPackage = {
+      ...record.document,
+      status: "needs_review",
+      updatedAt: new Date().toISOString(),
+    };
+    await this.writeRecord({
+      document,
+      transcription: record.transcription,
+      metadata: record.metadata,
+    });
+    return document;
+  }
+
+  async listApprovedDocumentsPage(input: {
+    offset: number;
+    limit: number;
+  }): Promise<DocumentRecordsPage> {
+    // Approved status only lives inside the record body, so we have to read
+    // every record to filter. This is fine for the expected scale (hundreds
+    // of approved records, not millions) and matches what
+    // `listApprovedExportRows` already does.
+    const records = await this.readAllRecords();
+    const approved = records
+      .filter((record) => record.document.status === "approved")
+      .sort((a, b) =>
+        a.document.updatedAt < b.document.updatedAt ? 1 : -1,
+      );
+    const offset = Math.max(0, input.offset);
+    const limit = Math.max(1, input.limit);
+    const slice = approved.slice(offset, offset + limit);
+    const page = this.recordsToDocumentRecords(slice);
+    return {
+      ...page,
+      totalCount: approved.length,
+      offset,
+      limit,
+      hasMore: offset + limit < approved.length,
+    };
+  }
+
   async deleteDocument(documentId: string): Promise<boolean> {
     const path = recordPath(documentId);
     const { blobs } = await list({ prefix: path, limit: 1 });

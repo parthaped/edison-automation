@@ -40,12 +40,12 @@ describe("processSourceFile (workflow building block)", () => {
     const result = await processSourceFile({
       sourceFile,
       bytes,
-      folderId: "D9032-F",
+      folderId: "E2002",
       batchIndex: 5,
       existingIds: new Set(),
       rawOcrText: "Edison Electric Light Co.",
     });
-    expect(result.documentPackage.documentId).toMatch(/D9032-/);
+    expect(result.documentPackage.documentId).toMatch(/^E2002[A-Z]{3}/);
     expect(result.transcription.ocrText).toBe("Edison Electric Light Co.");
     expect(result.confidence).not.toBe("blocked");
   });
@@ -91,9 +91,9 @@ describe("mergeTranscribedMetadata (persist step)", () => {
   it("leaves subjects empty when transcribed metadata has none", () => {
     const merged = mergeTranscribedMetadata(
       {
-        folderId: "D9032-F",
-        documentId: "D9032-00001",
-        title: "[D9032-00001]",
+        folderId: "E2002",
+        documentId: "E2002AAA",
+        title: "[E2002AAA]",
         documentType: "",
         date: "",
         authors: [],

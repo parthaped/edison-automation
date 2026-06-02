@@ -9,7 +9,7 @@ describe("export csv", () => {
     const row = buildExportCsvRow(sampleMetadata, sampleTranscription);
 
     expect(row["o:id"]).toBe("");
-    expect(row["dcterms:identifier"]).toBe("D9032-00001");
+    expect(row["dcterms:identifier"]).toBe("E2002AAA");
     expect(row["dcterms:title"]).toBe(
       buildCatalogTitle(sampleMetadata.documentId, sampleMetadata),
     );
@@ -23,11 +23,11 @@ describe("export csv", () => {
     expect(row["dcterms:subject"]).toBe("Electric light|station materials");
     expect(row["dcterms:coverage"]).toBe("Philadelphia");
     expect(row["dcterms:isPartOf"]).toBe(
-      "[D9032-F] Document File Series -- 1890",
+      "[E2002-F] Document File Series -- 1890",
     );
     expect(row["scripto:transcription"]).toBe(sampleTranscription.diplomaticText);
     expect(row["o:media/file"]).toBe(
-      "D9032-00001/d9032-00001_0001.jpg|D9032-00001/d9032-00001_0002.jpg",
+      "E2002_Page_01.jpg|E2002_Page_02.jpg",
     );
   });
 
@@ -48,7 +48,7 @@ describe("export csv", () => {
     ]);
 
     expect(csv).toContain('"Marks, William D."');
-    expect(csv).toContain('"## D9032-00001/d9032-00001_0001.jpg');
+    expect(csv).toContain('"## E2002_Page_01.jpg');
     expect(csv).toContain("Letterhead:");
     expect(csv).toContain("Edison Electric Light Co. of Philadelphia");
   });
@@ -77,6 +77,6 @@ describe("export csv", () => {
     ).not.toThrow();
 
     const row = buildExportCsvRow(partialMetadata, sampleTranscription);
-    expect(row["dcterms:title"]).toContain("[D9032-00001]");
+    expect(row["dcterms:title"]).toContain("[E2002AAA]");
   });
 });

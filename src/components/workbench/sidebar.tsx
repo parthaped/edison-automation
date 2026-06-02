@@ -1,6 +1,6 @@
 "use client";
 
-import { Download, FileCheck2, History, Upload } from "lucide-react";
+import { Archive, Download, FileCheck2, History, Upload } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -25,6 +25,12 @@ const navItems: NavItem[] = [
     href: "/review",
     description: "Verify transcriptions",
     icon: FileCheck2,
+  },
+  {
+    label: "Past verifications",
+    href: "/past",
+    description: "Approved transcriptions",
+    icon: Archive,
   },
   {
     label: "Audit trail",
@@ -116,6 +122,9 @@ export function WorkbenchSidebar() {
       </nav>
 
       <div className="border-t border-sidebar-border p-2">
+        {/* This is an API route that streams a CSV file. Using <Link/> would
+            attempt to prefetch and intercept it; a plain anchor is correct. */}
+        {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
         <a
           href="/api/export/transcriptions"
           className="flex items-center gap-2 rounded-md px-2.5 py-2 text-[13px] font-medium text-sidebar-foreground transition-colors hover:bg-sidebar-accent"

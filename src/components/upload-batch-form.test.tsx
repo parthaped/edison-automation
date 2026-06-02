@@ -108,7 +108,9 @@ describe("UploadBatchForm", () => {
         expect.objectContaining({ cache: "no-store" }),
       );
     });
-    expect((await screen.findAllByText("D9032-00001")).length).toBeGreaterThan(0);
+    expect(
+      (await screen.findAllByText(/transcribed/i)).length,
+    ).toBeGreaterThan(0);
   });
 
   it("uses multipart Blob upload for large files", async () => {

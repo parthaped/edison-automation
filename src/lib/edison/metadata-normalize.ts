@@ -60,6 +60,11 @@ export function mapLegacyDocumentType(documentType: string): string {
   return mapped ?? normalized;
 }
 
+/**
+ * Returns the folder id in its bare TAEP form (no `-F`). Accepts both the
+ * new canonical form (`E2002`) and the legacy `E2002-F` form so old records
+ * still display correctly.
+ */
 export function formatGloc(folderId: string): string {
   const trimmed = normalizeMetadataValue(folderId);
   if (trimmed.length === 0) return "";
@@ -71,6 +76,11 @@ function yearFromDate(date: string): string | undefined {
   return match?.[1];
 }
 
+/**
+ * Builds the Omeka `dcterms:isPartOf` label. We always emit `[<gloc>-F]` here
+ * regardless of how the folder id is stored internally, because that label
+ * format is what the Rutgers Omeka catalog expects.
+ */
 export function buildIsPartOf(folderId: string, date: string): string {
   const gloc = formatGloc(folderId);
   if (gloc.length === 0) return "";

@@ -8,13 +8,29 @@ export const metadata: Metadata = {
 };
 
 export default async function AuditPage() {
-  const events = await getEdisonService().getAuditTrail();
+  const service = getEdisonService();
+  const [events, records] = await Promise.all([
+    service.getAuditTrail({ limit: 500 }),
+    service.getRepository().listDocumentRecords(),
+  ]);
+
+  // The Active/Past scope filter lives client-side, but it needs to know
+  // which document ids are still in the active queue vs already approved
+  // or exported. We pass the set down so the client doesn't have to fetch.
+  const activeDocumentIds = new Set(
+    records.documents
+      .filter(
+        (document) =>
+          document.status !== "approved" && document.status !== "exported",
+      )
+      .map((document) => document.documentId),
+  );
 
   return (
     <>
       <ContentHeader
         title="Audit trail"
-        description="Chronological record of ingest, transcription, confidence grading, and status changes across every document."
+        description="Append-only log of ingest, transcription, review edits, approvals, splits, and folder renames."
       />
       <main className="flex-1 overflow-y-auto px-6 py-6 sm:px-8">
         {events.length === 0 ? (
@@ -28,7 +44,7 @@ export default async function AuditPage() {
             </p>
           </div>
         ) : (
-          <AuditTrail events={events} />
+          <AuditTrail events={events} activeDocumentIds={activeDocumentIds} />
         )}
       </main>
     </>

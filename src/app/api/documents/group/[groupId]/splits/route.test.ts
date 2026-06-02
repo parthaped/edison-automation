@@ -40,10 +40,10 @@ async function buildSeededService(): Promise<EdisonAutomationService> {
       mimeType: "application/pdf",
     },
     bytes,
-    folderId: "D9032-F",
+    folderId: "E2002",
     batchIndex: 1,
     existingIds: new Set(),
-    providedDocumentId: "D9032-99001",
+    providedDocumentId: "E2002AAZ",
     subDocuments: [
       {
         startPage: 1,
@@ -97,14 +97,14 @@ describe("/api/documents/group/[groupId]/splits", () => {
   it("rebuilds siblings on a valid splits payload", async () => {
     const { POST } = await import("./route");
     const response = await POST(
-      new Request("https://example.test/api/documents/group/D9032-99001/splits", {
+      new Request("https://example.test/api/documents/group/E2002AAZ/splits", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           splits: [{ startPage: 1, endPage: 6, title: "Merged" }],
         }),
       }),
-      { params: Promise.resolve({ groupId: "D9032-99001" }) },
+      { params: Promise.resolve({ groupId: "E2002AAZ" }) },
     );
 
     expect(response.status).toBe(200);
@@ -113,7 +113,7 @@ describe("/api/documents/group/[groupId]/splits", () => {
     };
     expect(body.siblings).toHaveLength(1);
     expect(body.siblings[0]).toMatchObject({
-      documentId: "D9032-99001",
+      documentId: "E2002AAZ",
       startPage: 1,
       endPage: 6,
     });
@@ -122,7 +122,7 @@ describe("/api/documents/group/[groupId]/splits", () => {
   it("rejects gaps with a 400", async () => {
     const { POST } = await import("./route");
     const response = await POST(
-      new Request("https://example.test/api/documents/group/D9032-99001/splits", {
+      new Request("https://example.test/api/documents/group/E2002AAZ/splits", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -132,7 +132,7 @@ describe("/api/documents/group/[groupId]/splits", () => {
           ],
         }),
       }),
-      { params: Promise.resolve({ groupId: "D9032-99001" }) },
+      { params: Promise.resolve({ groupId: "E2002AAZ" }) },
     );
 
     expect(response.status).toBe(400);
@@ -143,12 +143,12 @@ describe("/api/documents/group/[groupId]/splits", () => {
   it("rejects malformed payloads with a 400", async () => {
     const { POST } = await import("./route");
     const response = await POST(
-      new Request("https://example.test/api/documents/group/D9032-99001/splits", {
+      new Request("https://example.test/api/documents/group/E2002AAZ/splits", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ splits: [{ startPage: "x" }] }),
       }),
-      { params: Promise.resolve({ groupId: "D9032-99001" }) },
+      { params: Promise.resolve({ groupId: "E2002AAZ" }) },
     );
 
     expect(response.status).toBe(400);
@@ -158,9 +158,9 @@ describe("/api/documents/group/[groupId]/splits", () => {
     const { GET } = await import("./route");
     const response = await GET(
       new Request(
-        "https://example.test/api/documents/group/D9032-99001/splits",
+        "https://example.test/api/documents/group/E2002AAZ/splits",
       ),
-      { params: Promise.resolve({ groupId: "D9032-99001" }) },
+      { params: Promise.resolve({ groupId: "E2002AAZ" }) },
     );
     expect(response.status).toBe(200);
     const body = (await response.json()) as {
@@ -170,12 +170,12 @@ describe("/api/documents/group/[groupId]/splits", () => {
     expect(body.totalPages).toBe(6);
     expect(body.siblings).toHaveLength(2);
     expect(body.siblings[0]).toMatchObject({
-      documentId: "D9032-99001",
+      documentId: "E2002AAZ",
       startPage: 1,
       endPage: 3,
     });
     expect(body.siblings[1]).toMatchObject({
-      documentId: "D9032-99001-A",
+      documentId: "E2002AAZ1",
       startPage: 4,
       endPage: 6,
     });

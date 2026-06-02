@@ -18,7 +18,7 @@ describe("BlobEdisonRepository", () => {
       .mockResolvedValueOnce({
         blobs: [
           {
-            pathname: "records/D9032-00001.json",
+            pathname: "records/E2002AAA.json",
             url: "https://blob.example/1",
           },
         ],
@@ -28,7 +28,7 @@ describe("BlobEdisonRepository", () => {
       .mockResolvedValueOnce({
         blobs: [
           {
-            pathname: "records/D9032-00002.json",
+            pathname: "records/E2002AAB.json",
             url: "https://blob.example/2",
           },
         ],
@@ -39,7 +39,7 @@ describe("BlobEdisonRepository", () => {
     const repository = new BlobEdisonRepository();
     const ids = await repository.listDocumentIds();
 
-    expect(ids).toEqual(["D9032-00001", "D9032-00002"]);
+    expect(ids).toEqual(["E2002AAA", "E2002AAB"]);
     expect(listMock).toHaveBeenCalledTimes(2);
     expect(listMock.mock.calls[0]?.[0]).toMatchObject({
       prefix: "records/",

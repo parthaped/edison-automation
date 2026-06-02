@@ -187,6 +187,50 @@ export class InMemoryEdisonRepository implements EdisonRepository {
     return updated;
   }
 
+  async unapproveDocument(documentId: string): Promise<DocumentPackage | null> {
+    const document = this.documents.get(documentId);
+    if (!document) return null;
+    if (document.status !== "approved") return document;
+
+    const updated: DocumentPackage = {
+      ...document,
+      status: "needs_review",
+      updatedAt: new Date().toISOString(),
+    };
+    this.documents.set(documentId, updated);
+    return updated;
+  }
+
+  async listApprovedDocumentsPage(input: {
+    offset: number;
+    limit: number;
+  }): Promise<DocumentRecordsPage> {
+    const approved = [...this.documents.values()]
+      .filter((document) => document.status === "approved")
+      .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
+    const offset = Math.max(0, input.offset);
+    const limit = Math.max(1, input.limit);
+    const documents = approved.slice(offset, offset + limit);
+    const transcriptions: Record<string, TranscriptionRun> = {};
+    const metadata: Record<string, MetadataExtraction> = {};
+    for (const document of documents) {
+      transcriptions[document.documentId] =
+        this.transcriptions.get(document.documentId) ??
+        emptyTranscription(document.documentId);
+      metadata[document.documentId] =
+        this.metadata.get(document.documentId) ?? emptyMetadata(document);
+    }
+    return {
+      documents,
+      transcriptions,
+      metadata,
+      totalCount: approved.length,
+      offset,
+      limit,
+      hasMore: offset + limit < approved.length,
+    };
+  }
+
   async deleteDocument(documentId: string): Promise<boolean> {
     if (!this.documents.has(documentId)) return false;
     this.documents.delete(documentId);

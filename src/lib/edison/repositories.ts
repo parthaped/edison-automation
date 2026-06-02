@@ -49,6 +49,12 @@ export interface EdisonRepository {
     offset: number;
     limit: number;
   }): Promise<DocumentRecordsPage>;
+  // Paginated read of only `status === "approved"` records, sorted by
+  // `updatedAt` descending. Powers the Past verifications tab.
+  listApprovedDocumentsPage(input: {
+    offset: number;
+    limit: number;
+  }): Promise<DocumentRecordsPage>;
   getDocumentRecord(documentId: string): Promise<DocumentRecord | null>;
   saveDocuments(documents: DocumentPackage[]): Promise<void>;
   saveProcessedDocuments(
@@ -68,6 +74,9 @@ export interface EdisonRepository {
   // Marks a document approved so it is included in the transcriptions CSV
   // export. Returns the updated package, or null when the document is unknown.
   approveDocument(documentId: string): Promise<DocumentPackage | null>;
+  // Moves an approved document back to `needs_review` so reviewers can edit
+  // it again. Returns the updated package, or null when the document is unknown.
+  unapproveDocument(documentId: string): Promise<DocumentPackage | null>;
   // Permanently removes a document and its sidecars from review and export.
   // Returns false when the document id is unknown.
   deleteDocument(documentId: string): Promise<boolean>;

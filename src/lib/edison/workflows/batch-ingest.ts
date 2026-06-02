@@ -5,7 +5,11 @@ import {
   getWritable,
 } from "workflow";
 import { createExtractionPlan, type ExtractionPlan } from "../extraction";
-import { assignDocumentId, normalizeFolderId } from "../id-policy";
+import {
+  assignDocumentId,
+  defaultFolderIdFromFileName,
+  normalizeFolderId,
+} from "../id-policy";
 import {
   effectiveFileConcurrency,
   getPageChunkSize,
@@ -720,13 +724,58 @@ async function persistSubDocumentsStep(
     rasterizeError: input.rasterizeError,
   });
 
-  const repository = getEdisonService().getRepository();
+  const service = getEdisonService();
+  const repository = service.getRepository();
+  const auditLog = service.getAuditLog();
   for (const sibling of processed.siblings) {
     await repository.saveProcessedDocument(
       sibling.documentPackage,
       sibling.transcription,
       sibling.metadata,
     );
+    const now = new Date().toISOString();
+    await auditLog.append({
+      type: "file_ingested",
+      timestamp: now,
+      documentId: sibling.documentPackage.documentId,
+      folderId: sibling.documentPackage.folderId,
+      title: sibling.documentPackage.title,
+      detail: `${sibling.documentPackage.pages.length} page(s) from ${blob.name}`,
+      metadata: {
+        sourceFile: blob.name,
+        pageCount: sibling.documentPackage.pages.length,
+        groupId: sibling.documentPackage.sourceGroup?.groupId,
+      },
+    });
+    await auditLog.append({
+      type: "file_transcribed",
+      timestamp: now,
+      documentId: sibling.documentPackage.documentId,
+      folderId: sibling.documentPackage.folderId,
+      title: sibling.documentPackage.title,
+      detail: `${input.model ?? "gateway-configured-model"} · prompt v${sibling.transcription.promptVersion}`,
+      metadata: {
+        model: input.model,
+        promptVersion: sibling.transcription.promptVersion,
+        inputTokens: sibling.transcription.inputTokens,
+        outputTokens: sibling.transcription.outputTokens,
+        costUsd: sibling.transcription.costUsd,
+      },
+    });
+    await auditLog.append({
+      type: "file_graded",
+      timestamp: now,
+      documentId: sibling.documentPackage.documentId,
+      folderId: sibling.documentPackage.folderId,
+      title: sibling.documentPackage.title,
+      confidence: sibling.documentPackage.confidence,
+      status: sibling.documentPackage.status,
+      detail: `Graded ${sibling.documentPackage.confidence}`,
+      metadata: {
+        confidence: sibling.documentPackage.confidence,
+        uncertainReadings: sibling.transcription.uncertainReadings.length,
+      },
+    });
   }
 
   timer.mark("persistEnd");
@@ -776,11 +825,25 @@ async function emitBatchStartedStep(input: {
     totalFiles: input.files.length,
     folderId: input.folderId,
   });
+  const startedAt = new Date().toISOString();
   await emitEvent({
     type: "batch-started",
     folderId: input.folderId,
     files: input.files,
-    startedAt: new Date().toISOString(),
+    startedAt,
+  });
+  await getEdisonService().getAuditLog().append({
+    type: "ingest_started",
+    timestamp: startedAt,
+    folderId: input.folderId
+      ? normalizeFolderId(input.folderId)
+      : undefined,
+    detail: `${input.files.length} file(s) queued`,
+    metadata: {
+      totalFiles: input.files.length,
+      folderId: input.folderId,
+      fileNames: input.files.map((file) => file.name),
+    },
   });
 }
 
@@ -793,11 +856,16 @@ async function assignIdsStep(input: {
   const existingIds = new Set(
     await getEdisonService().getRepository().listDocumentIds(),
   );
-  const folderId = input.folderId
+  const normalizedBatchFolder = input.folderId
     ? normalizeFolderId(input.folderId)
-    : "UNASSIGNED-F";
+    : undefined;
 
   return input.fileNames.map((fileName, index) => {
+    // When the operator left the folder blank, each file's filename stem
+    // becomes its folder (`E2002.pdf` -> `E2002`). When they supplied a
+    // single folder, every file shares it and the next-available-position
+    // logic disambiguates the doc ids.
+    const folderId = normalizedBatchFolder ?? defaultFolderIdFromFileName(fileName);
     const assigned = assignDocumentId({
       folderId,
       sourceName: fileName,

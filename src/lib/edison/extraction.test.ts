@@ -16,7 +16,7 @@ describe("extraction", () => {
     const bytes = await makePdf(3);
     const sourceFile: SourceFile = {
       id: "source-1",
-      name: "D9032-00001.pdf",
+      name: "E2002.pdf",
       size: bytes.length,
       mimeType: "application/pdf",
     };
@@ -41,11 +41,11 @@ describe("extraction", () => {
     expect(plan.blockedReason).toContain("could not be opened");
   });
 
-  it("creates a document package with ordered page image names", async () => {
+  it("creates a document package with TAEP-style image filenames", async () => {
     const bytes = await makePdf(2);
     const sourceFile: SourceFile = {
       id: "source-1",
-      name: "D9032-00001.pdf",
+      name: "E2002.pdf",
       size: bytes.length,
       mimeType: "application/pdf",
     };
@@ -53,13 +53,34 @@ describe("extraction", () => {
     const documentPackage = await createDocumentPackage({
       sourceFile,
       bytes,
-      folderId: "D9032-F",
+      folderId: "E2002",
       batchIndex: 1,
       existingIds: new Set(),
     });
 
-    expect(documentPackage.documentId).toBe("D9032-00001");
+    expect(documentPackage.documentId).toBe("E2002AAA");
     expect(documentPackage.pages).toHaveLength(2);
-    expect(documentPackage.pages[1].imageFilename).toBe("D9032-00001/d9032-00001_0002.jpg");
+    expect(documentPackage.pages[1].imageFilename).toBe("E2002_Page_02.jpg");
+  });
+
+  it("defaults the folder id to the file name stem when omitted", async () => {
+    const bytes = await makePdf(1);
+    const sourceFile: SourceFile = {
+      id: "source-1",
+      name: "E2002.pdf",
+      size: bytes.length,
+      mimeType: "application/pdf",
+    };
+
+    const documentPackage = await createDocumentPackage({
+      sourceFile,
+      bytes,
+      batchIndex: 1,
+      existingIds: new Set(),
+    });
+
+    expect(documentPackage.folderId).toBe("E2002");
+    expect(documentPackage.documentId).toBe("E2002AAA");
+    expect(documentPackage.pages[0].imageFilename).toBe("E2002_Page_01.jpg");
   });
 });

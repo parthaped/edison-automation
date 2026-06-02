@@ -83,9 +83,9 @@ describe("InMemoryEdisonRepository.deleteDocument", () => {
   it("removes the document and its sidecars", async () => {
     const repository = new InMemoryEdisonRepository(true);
 
-    expect(await repository.deleteDocument("D9032-00001")).toBe(true);
-    expect(await repository.getDocumentRecord("D9032-00001")).toBeNull();
-    expect(await repository.deleteDocument("D9032-00001")).toBe(false);
+    expect(await repository.deleteDocument("E2002AAA")).toBe(true);
+    expect(await repository.getDocumentRecord("E2002AAA")).toBeNull();
+    expect(await repository.deleteDocument("E2002AAA")).toBe(false);
   });
 });
 

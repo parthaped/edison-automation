@@ -1,5 +1,6 @@
 import { PDFDocument } from "pdf-lib";
 import { describe, expect, it } from "vitest";
+import { InMemoryAuditLog } from "./audit-log";
 import { InMemoryEdisonRepository } from "./in-memory-repository";
 import {
   EdisonAutomationService,
@@ -46,7 +47,7 @@ describe("EdisonAutomationService", () => {
 
   it("processes a source file and persists it through the repository", async () => {
     const repository = new InMemoryEdisonRepository(false);
-    const file = await makeUploadFile("D9032-00001.pdf", "application/pdf");
+    const file = await makeUploadFile("E2002.pdf", "application/pdf");
     const bytes = new Uint8Array(await file.arrayBuffer());
 
     const processed = await processSourceFile({
@@ -57,12 +58,13 @@ describe("EdisonAutomationService", () => {
         mimeType: file.type,
       },
       bytes,
-      folderId: "D9032-F",
+      folderId: "E2002",
       batchIndex: 1,
       existingIds: new Set(),
     });
 
-    expect(processed.documentPackage.documentId).toBe("D9032-00001");
+    // Folder `E2002` + position 0 = TAEP-style `E2002AAA`.
+    expect(processed.documentPackage.documentId).toBe("E2002AAA");
 
     await repository.saveProcessedDocument(
       processed.documentPackage,
@@ -84,13 +86,13 @@ describe("EdisonAutomationService", () => {
         mimeType: file.type,
       },
       bytes,
-      folderId: "D9032-F",
+      folderId: "E2002",
       batchIndex: 2,
       existingIds: new Set(),
-      providedDocumentId: "D9032-00002-1",
+      providedDocumentId: "E2002AAF1",
     });
 
-    expect(processed.documentPackage.documentId).toBe("D9032-00002-1");
+    expect(processed.documentPackage.documentId).toBe("E2002AAF1");
   });
 
   it("attaches per-page image URLs supplied by the rasterize step", async () => {
@@ -109,7 +111,7 @@ describe("EdisonAutomationService", () => {
         mimeType: file.type,
       },
       bytes,
-      folderId: "D9032-F",
+      folderId: "E2002",
       batchIndex: 3,
       existingIds: new Set(),
       pageImageUrls: [
@@ -139,7 +141,7 @@ describe("EdisonAutomationService", () => {
         mimeType: "image/jpeg",
       },
       bytes,
-      folderId: "D9032-F",
+      folderId: "E2002",
       batchIndex: 4,
       existingIds: new Set(),
       pageImageUrls: [
@@ -165,7 +167,7 @@ describe("EdisonAutomationService", () => {
     const repository = new InMemoryEdisonRepository(true);
     const service = new EdisonAutomationService(repository);
 
-    const approved = await service.approveDocument("D9032-00001");
+    const approved = await service.approveDocument("E2002AAA");
     expect(approved.status).toBe("approved");
 
     const csv = await service.exportTranscriptionsCsv();
@@ -173,8 +175,8 @@ describe("EdisonAutomationService", () => {
     expect(csv.split("\n")[0]).toBe(
       "o:id,dcterms:identifier,dcterms:title,dcterms:type,dcterms:date,dcterms:creator,bibo:recipient,dcterms:relation,dcterms:subject,dcterms:coverage,dcterms:isPartOf,scripto:transcription,o:media/file",
     );
-    expect(csv).toContain("D9032-00001");
-    expect(csv).toContain("[D9032-F] Document File Series -- 1890");
+    expect(csv).toContain("E2002AAA");
+    expect(csv).toContain("[E2002-F] Document File Series -- 1890");
   });
 
   it("refuses to approve a blocked document", async () => {
@@ -182,7 +184,7 @@ describe("EdisonAutomationService", () => {
     const service = new EdisonAutomationService(repository);
 
     await expect(
-      service.approveDocument("NEW-D8501-00003"),
+      service.approveDocument("D8501AAA"),
     ).rejects.toMatchObject({ code: "BAD_REQUEST", status: 409 });
   });
 
@@ -199,13 +201,13 @@ describe("EdisonAutomationService", () => {
     const repository = new InMemoryEdisonRepository(true);
     const service = new EdisonAutomationService(repository);
 
-    await service.deleteDocument("D9032-00001");
+    await service.deleteDocument("E2002AAA");
 
-    expect(await repository.getDocumentRecord("D9032-00001")).toBeNull();
+    expect(await repository.getDocumentRecord("E2002AAA")).toBeNull();
     const { reviewCase } = await service.getReviewWorkbench();
     expect(
       reviewCase?.documents.some(
-        (document) => document.documentId === "D9032-00001",
+        (document) => document.documentId === "E2002AAA",
       ),
     ).toBe(false);
   });
@@ -217,6 +219,191 @@ describe("EdisonAutomationService", () => {
       code: "NOT_FOUND",
       status: 404,
     });
+  });
+
+  it("unapproves a previously approved document", async () => {
+    const repository = new InMemoryEdisonRepository(true);
+    const service = new EdisonAutomationService(repository);
+    await service.approveDocument("E2002AAA");
+
+    const restored = await service.unapproveDocument("E2002AAA");
+    expect(restored.status).toBe("needs_review");
+    const refetched = await repository.getDocumentRecord("E2002AAA");
+    expect(refetched?.document.status).toBe("needs_review");
+  });
+
+  it("refuses to unapprove a document that is not approved", async () => {
+    const repository = new InMemoryEdisonRepository(true);
+    const service = new EdisonAutomationService(repository);
+
+    await expect(service.unapproveDocument("E2002AAA")).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      status: 409,
+    });
+  });
+
+  it("hides approved documents from the active review queue", async () => {
+    const repository = new InMemoryEdisonRepository(true);
+    const service = new EdisonAutomationService(repository);
+
+    await service.approveDocument("E2002AAA");
+    const { reviewCase } = await service.getReviewWorkbench();
+    expect(
+      reviewCase?.documents.some((doc) => doc.documentId === "E2002AAA"),
+    ).toBe(false);
+
+    const past = await service.getApprovedDocuments({ offset: 0, limit: 50 });
+    expect(past.documents.map((doc) => doc.documentId)).toContain("E2002AAA");
+  });
+
+  it("renames a standalone document's folder and migrates the record", async () => {
+    const repository = new InMemoryEdisonRepository(true);
+    const service = new EdisonAutomationService(repository);
+
+    const renamed = await service.renameFolderId("E2002AAA", "X9000");
+
+    expect(renamed[0].document.folderId).toBe("X9000");
+    expect(renamed[0].document.documentId).toBe("X9000AAA");
+    expect(await repository.getDocumentRecord("E2002AAA")).toBeNull();
+    expect(await repository.getDocumentRecord("X9000AAA")).not.toBeNull();
+  });
+
+  it("renames every sibling when the document belongs to a source group", async () => {
+    const repository = new InMemoryEdisonRepository(false);
+    const file = await makeMultiPageUploadFile(
+      "group-rename.pdf",
+      "application/pdf",
+      4,
+    );
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const initial = await processSourceFileSubDocuments({
+      sourceFile: {
+        id: "src-rename",
+        name: file.name,
+        size: file.size,
+        mimeType: file.type,
+      },
+      bytes,
+      folderId: "E2002",
+      batchIndex: 1,
+      existingIds: new Set(),
+      providedDocumentId: "E2002AAA",
+      subDocuments: [
+        {
+          startPage: 1,
+          endPage: 2,
+          ocrText: "A",
+          uncertainReadings: [],
+          metadata: {
+            title: "First",
+            documentType: "correspondence",
+            date: "1890",
+            authors: [],
+            recipients: [],
+            mentionedNames: [],
+            subjects: [],
+            places: [],
+          },
+        },
+        {
+          startPage: 3,
+          endPage: 4,
+          ocrText: "B",
+          uncertainReadings: [],
+          metadata: {
+            title: "Second",
+            documentType: "correspondence",
+            date: "1891",
+            authors: [],
+            recipients: [],
+            mentionedNames: [],
+            subjects: [],
+            places: [],
+          },
+        },
+      ],
+    });
+    for (const sibling of initial.siblings) {
+      await repository.saveProcessedDocument(
+        sibling.documentPackage,
+        sibling.transcription,
+        sibling.metadata,
+      );
+    }
+
+    const service = new EdisonAutomationService(repository);
+    const renamed = await service.renameFolderId("E2002AAA", "X9000");
+
+    expect(renamed.map((record) => record.document.documentId)).toEqual([
+      "X9000AAA",
+      "X9000AAA1",
+    ]);
+    const survivors = await repository.listDocumentIds();
+    expect(survivors).toContain("X9000AAA");
+    expect(survivors).not.toContain("E2002AAA");
+    expect(survivors).not.toContain("E2002AAA1");
+  });
+
+  it("rejects an empty folder rename", async () => {
+    const repository = new InMemoryEdisonRepository(true);
+    const service = new EdisonAutomationService(repository);
+
+    await expect(
+      service.renameFolderId("E2002AAA", "   "),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+
+  it("emits audit events for approve, unapprove, edit, comments, delete, and rename", async () => {
+    const repository = new InMemoryEdisonRepository(true);
+    const auditLog = new InMemoryAuditLog();
+    const service = new EdisonAutomationService(repository, auditLog);
+
+    await service.approveDocument("E2002AAA");
+    await service.unapproveDocument("E2002AAA");
+    await service.saveTranscriptionEdit("E2002AAA", "Edited text");
+    await service.saveMetadataComments("E2002AAA", "New comment");
+    await service.renameFolderId("E2002AAA", "X9000");
+    await service.deleteDocument("X9000AAA");
+
+    const events = await auditLog.list();
+    const types = events.map((event) => event.type);
+    expect(types).toContain("approved");
+    expect(types).toContain("unapproved");
+    expect(types).toContain("text_edited");
+    expect(types).toContain("comments_edited");
+    expect(types).toContain("folder_renamed");
+    expect(types).toContain("deleted");
+  });
+
+  it("scopes audit events to active or past via getAuditTrail", async () => {
+    const repository = new InMemoryEdisonRepository(true);
+    const auditLog = new InMemoryAuditLog();
+    const service = new EdisonAutomationService(repository, auditLog);
+
+    await service.approveDocument("E2002AAA");
+    await service.saveTranscriptionEdit("N042AAA", "Updated text");
+
+    const past = await service.getAuditTrail({ scope: "past" });
+    expect(
+      past.every((event) =>
+        event.documentId ? event.documentId === "E2002AAA" : true,
+      ),
+    ).toBe(true);
+
+    const active = await service.getAuditTrail({ scope: "active" });
+    expect(active.some((event) => event.documentId === "N042AAA")).toBe(true);
+    expect(active.some((event) => event.documentId === "E2002AAA")).toBe(false);
+  });
+
+  it("exports a single approved document via exportSingleTranscriptionCsv", async () => {
+    const repository = new InMemoryEdisonRepository(true);
+    const service = new EdisonAutomationService(repository);
+
+    await service.approveDocument("E2002AAA");
+    const csv = await service.exportSingleTranscriptionCsv("E2002AAA");
+
+    expect(csv.startsWith("o:id,dcterms:identifier")).toBe(true);
+    expect(csv).toContain("E2002AAA");
   });
 
   it("updates group splits by rebuilding sibling documents", async () => {
@@ -235,10 +422,10 @@ describe("EdisonAutomationService", () => {
         mimeType: file.type,
       },
       bytes,
-      folderId: "D9032-F",
+      folderId: "E2002",
       batchIndex: 1,
       existingIds: new Set(),
-      providedDocumentId: "D9032-00040",
+      providedDocumentId: "E2002AAB",
       subDocuments: [
         {
           startPage: 1,
@@ -287,19 +474,19 @@ describe("EdisonAutomationService", () => {
     }
 
     const service = new EdisonAutomationService(repository);
-    const merged = await service.updateGroupSplits("D9032-00040", [
+    const merged = await service.updateGroupSplits("E2002AAB", [
       { startPage: 1, endPage: 4, title: "Combined" },
     ]);
 
     expect(merged).toHaveLength(1);
-    expect(merged[0].document.documentId).toBe("D9032-00040");
+    expect(merged[0].document.documentId).toBe("E2002AAB");
     expect(merged[0].document.pages.map((p) => p.sourcePage)).toEqual([
       1, 2, 3, 4,
     ]);
-    // The new single sibling replaces the second sibling (-A).
+    // The new single sibling replaces the second sibling (numeric attachment).
     const survivors = await repository.listDocumentIds();
-    expect(survivors).toContain("D9032-00040");
-    expect(survivors).not.toContain("D9032-00040-A");
+    expect(survivors).toContain("E2002AAB");
+    expect(survivors).not.toContain("E2002AAB1");
   });
 
   it("rejects splits that do not cover every page", async () => {
@@ -318,10 +505,10 @@ describe("EdisonAutomationService", () => {
         mimeType: file.type,
       },
       bytes,
-      folderId: "D9032-F",
+      folderId: "E2002",
       batchIndex: 2,
       existingIds: new Set(),
-      providedDocumentId: "D9032-00050",
+      providedDocumentId: "E2002AAC",
       subDocuments: [
         {
           startPage: 1,
@@ -350,7 +537,7 @@ describe("EdisonAutomationService", () => {
     }
     const service = new EdisonAutomationService(repository);
     await expect(
-      service.updateGroupSplits("D9032-00050", [
+      service.updateGroupSplits("E2002AAC", [
         { startPage: 1, endPage: 2 },
       ]),
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
@@ -372,7 +559,7 @@ describe("processSourceFile confidence", () => {
         mimeType: "image/png",
       },
       bytes,
-      folderId: "D9032-F",
+      folderId: "E2002",
       batchIndex: 1,
       existingIds: new Set(),
       rawOcrText,
@@ -450,9 +637,9 @@ describe("processSourceFile confidence", () => {
 
 describe("resolvePersistedDocumentStatus", () => {
   const basePackage = (overrides: Partial<DocumentPackage>): DocumentPackage => ({
-    id: "DOC-1",
-    folderId: "F-1",
-    documentId: "DOC-1",
+    id: "TESTAAA",
+    folderId: "TEST",
+    documentId: "TESTAAA",
     title: "Test",
     sourceFile: {
       id: "sf-1",
@@ -462,10 +649,10 @@ describe("resolvePersistedDocumentStatus", () => {
     },
     pages: [
       {
-        id: "DOC-1-page-1",
-        documentId: "DOC-1",
+        id: "TESTAAA-page-1",
+        documentId: "TESTAAA",
         pageIndex: 0,
-        imageFilename: "DOC-1/test_0001.jpg",
+        imageFilename: "TEST_Page_01.jpg",
         sourcePage: 1,
       },
     ],
@@ -647,10 +834,10 @@ describe("processSourceFileSubDocuments", () => {
         mimeType: file.type,
       },
       bytes,
-      folderId: "D9032-F",
+      folderId: "E2002",
       batchIndex: 1,
       existingIds: new Set(),
-      providedDocumentId: "D9032-00010",
+      providedDocumentId: "E2002AAA",
       subDocuments: [
         {
           startPage: 1,
@@ -678,14 +865,14 @@ describe("processSourceFileSubDocuments", () => {
     expect(result.blocked).toBe(false);
     expect(result.siblings).toHaveLength(1);
     const [sibling] = result.siblings;
-    expect(sibling.documentPackage.documentId).toBe("D9032-00010");
+    expect(sibling.documentPackage.documentId).toBe("E2002AAA");
     expect(sibling.documentPackage.pages).toHaveLength(2);
     expect(sibling.documentPackage.pages[0].originalUrl).toBe(
       "https://blob.example/p1.jpg",
     );
     expect(sibling.documentPackage.sourceGroup).toMatchObject({
-      groupId: "D9032-00010",
-      siblingIds: ["D9032-00010"],
+      groupId: "E2002AAA",
+      siblingIds: ["E2002AAA"],
       totalPages: 2,
       position: 0,
     });
@@ -708,10 +895,10 @@ describe("processSourceFileSubDocuments", () => {
         mimeType: file.type,
       },
       bytes,
-      folderId: "D9032-F",
+      folderId: "E2002",
       batchIndex: 1,
       existingIds: new Set(),
-      providedDocumentId: "D9032-00020",
+      providedDocumentId: "E2002AAF",
       subDocuments: [
         {
           startPage: 1,
@@ -770,10 +957,12 @@ describe("processSourceFileSubDocuments", () => {
 
     expect(result.blocked).toBe(false);
     expect(result.siblings).toHaveLength(3);
+    // Position 0 keeps the base id; subsequent siblings use numeric
+    // attachment suffixes matching the TAEP convention.
     expect(result.siblings.map((s) => s.documentPackage.documentId)).toEqual([
-      "D9032-00020",
-      "D9032-00020-A",
-      "D9032-00020-B",
+      "E2002AAF",
+      "E2002AAF1",
+      "E2002AAF2",
     ]);
 
     expect(
@@ -784,7 +973,7 @@ describe("processSourceFileSubDocuments", () => {
 
     expect(
       result.siblings[0].documentPackage.sourceGroup?.siblingIds,
-    ).toEqual(["D9032-00020", "D9032-00020-A", "D9032-00020-B"]);
+    ).toEqual(["E2002AAF", "E2002AAF1", "E2002AAF2"]);
 
     const [first, second, third] = result.siblings;
     expect(first.documentPackage.pages.map((p) => p.sourcePage)).toEqual([1, 2]);
@@ -821,10 +1010,10 @@ describe("processSourceFileSubDocuments", () => {
         mimeType: file.type,
       },
       bytes,
-      folderId: "D9032-F",
+      folderId: "E2002",
       batchIndex: 1,
       existingIds: new Set(),
-      providedDocumentId: "D9032-00030",
+      providedDocumentId: "E2002AAD",
       subDocuments: [
         {
           startPage: 1,
@@ -862,9 +1051,9 @@ describe("processSourceFileSubDocuments", () => {
 
 describe("mergeTranscribedMetadata", () => {
   const processed: MetadataExtraction = {
-    folderId: "D9032-F",
-    documentId: "D9032-00001",
-    title: "[D9032-00001]",
+    folderId: "E2002",
+    documentId: "E2002AAA",
+    title: "[E2002AAA]",
     documentType: "",
     date: "",
     authors: [],
@@ -905,7 +1094,7 @@ describe("mergeTranscribedMetadata", () => {
       places: [],
     });
 
-    expect(merged.title).toBe("[D9032-00001]");
+    expect(merged.title).toBe("[E2002AAA]");
     expect(merged.subjects).toEqual(["Electric light"]);
   });
 });
