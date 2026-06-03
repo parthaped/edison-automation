@@ -1,5 +1,102 @@
-import { describe, expect, it } from "vitest";
-import { mergePageChunkResults } from "./page-chunk-transcribe";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import * as aiRequest from "./ai-request";
+import {
+  findMissingPagesInChunkResult,
+  mergePageChunkResults,
+  type TranscribePageChunkFn,
+  transcribePageChunkResilient,
+} from "./page-chunk-transcribe";
+
+describe("findMissingPagesInChunkResult", () => {
+  it("lists requested pages absent from the model output", () => {
+    const missing = findMissingPagesInChunkResult(
+      [
+        { pageNumber: 1, url: "http://a" },
+        { pageNumber: 2, url: "http://b" },
+      ],
+      {
+        pages: [{ pageNumber: 1, text: "one" }],
+        model: "m",
+        promptVersion: "v",
+      },
+    );
+    expect(missing).toEqual([2]);
+  });
+});
+
+describe("transcribePageChunkResilient", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("binary-splits when a large chunk keeps failing", async () => {
+    vi.spyOn(aiRequest, "sleepMs").mockResolvedValue(undefined);
+    const transcribe: TranscribePageChunkFn = async (input) => {
+      if (input.pages.length > 4) {
+        throw new Error("rate limit 429");
+      }
+      return {
+        pages: input.pages.map((page) => ({
+          pageNumber: page.pageNumber,
+          text: `text-${page.pageNumber}`,
+        })),
+        model: "test-model",
+        promptVersion: "v1",
+      };
+    };
+
+    const result = await transcribePageChunkResilient(
+      {
+        pages: Array.from({ length: 8 }, (_, index) => ({
+          pageNumber: index + 1,
+          url: `http://page-${index + 1}`,
+        })),
+      },
+      { transcribe },
+    );
+
+    expect(result.pages).toHaveLength(8);
+    expect(result.pages.map((page) => page.text)).toEqual(
+      Array.from({ length: 8 }, (_, index) => `text-${index + 1}`),
+    );
+  });
+
+  it("retries when the model omits a page then succeeds", async () => {
+    vi.spyOn(aiRequest, "sleepMs").mockResolvedValue(undefined);
+    let calls = 0;
+    const transcribe: TranscribePageChunkFn = async (input) => {
+      calls += 1;
+      if (calls === 1) {
+        return {
+          pages: [{ pageNumber: 1, text: "only one" }],
+          model: "test-model",
+          promptVersion: "v1",
+        };
+      }
+      return {
+        pages: input.pages.map((page) => ({
+          pageNumber: page.pageNumber,
+          text: `text-${page.pageNumber}`,
+        })),
+        model: "test-model",
+        promptVersion: "v1",
+      };
+    };
+
+    const result = await transcribePageChunkResilient(
+      {
+        pages: [
+          { pageNumber: 1, url: "http://1" },
+          { pageNumber: 2, url: "http://2" },
+        ],
+      },
+      { transcribe },
+    );
+
+    expect(calls).toBeGreaterThan(1);
+    expect(result.pages).toHaveLength(2);
+  });
+});
 
 describe("mergePageChunkResults", () => {
   const metadata = {

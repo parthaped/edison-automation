@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  DEFAULT_PAGE_CHUNK_CONCURRENCY,
   effectiveFileConcurrency,
+  getPageChunkConcurrency,
   partitionPageRanges,
   shouldUsePageChunkedTranscription,
 } from "./ingest-policy";
@@ -34,6 +36,21 @@ describe("shouldUsePageChunkedTranscription", () => {
         pageCount: 1,
       }),
     ).toBe(false);
+  });
+});
+
+describe("getPageChunkConcurrency", () => {
+  it("defaults to 2 parallel chunk steps", () => {
+    expect(getPageChunkConcurrency()).toBe(DEFAULT_PAGE_CHUNK_CONCURRENCY);
+    expect(getPageChunkConcurrency()).toBe(2);
+  });
+
+  it("reads EDISON_PAGE_CHUNK_CONCURRENCY when set", () => {
+    const env = {
+      ...process.env,
+      EDISON_PAGE_CHUNK_CONCURRENCY: "1",
+    };
+    expect(getPageChunkConcurrency(env)).toBe(1);
   });
 });
 

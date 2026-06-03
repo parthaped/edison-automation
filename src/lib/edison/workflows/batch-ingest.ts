@@ -10,11 +10,14 @@ import {
   defaultFolderIdFromFileName,
   normalizeFolderId,
 } from "../id-policy";
+import { isTransientError } from "../ai-request";
 import {
   effectiveFileConcurrency,
+  getPageChunkConcurrency,
   getPageChunkSize,
   partitionPageRanges,
   shouldUsePageChunkedTranscription,
+  type PageRange,
 } from "../ingest-policy";
 import { StageTimer, type FileStageTimingMs } from "../ingest-timing";
 import type { BatchEvent } from "../ingest-job-store";
@@ -22,7 +25,8 @@ import {
   analyzeChunkedDocumentStructure,
   mergePageChunkResults,
   type ChunkedSubDocumentPlan,
-  transcribePageChunk,
+  transcribePageChunkResilient,
+  type PageImageRef,
   type TranscribePageChunkResult,
 } from "../page-chunk-transcribe";
 import { rasterizePdfWithProvider } from "../rasterize-provider";
@@ -79,7 +83,6 @@ interface FileFailure {
 }
 
 const BASE_MAX_CONCURRENCY = 3;
-const PAGE_CHUNK_CONCURRENCY = 3;
 
 // ---------- workflow ----------
 
@@ -329,6 +332,14 @@ async function prepareAndRasterizeStep(
     timer.mark("rasterizeEnd");
     const fetchMs = timer.segmentMs("fetchStart", "rasterizeStart");
     const rasterizeMs = timer.segmentMs("rasterizeStart", "rasterizeEnd");
+    const expectedPages = Math.max(1, extractionPlan.pageCount);
+    if (uploaded.length !== expectedPages) {
+      console.warn("[batch-ingest] rasterize:page-count-mismatch", {
+        fileName: blob.name,
+        uploaded: uploaded.length,
+        expected: expectedPages,
+      });
+    }
     console.info("[batch-ingest] rasterize:done", {
       fileName: blob.name,
       pages: uploaded.length,
@@ -442,6 +453,12 @@ async function transcribePreparedFile(
 
   try {
     if (useChunked && pageImageUrls.length > 0) {
+      if (pageImageUrls.length !== pageCount) {
+        throw new RetryableError(
+          `Rasterized ${pageImageUrls.length} of ${pageCount} pages for ${blob.name}.`,
+        );
+      }
+
       const chunkSize = getPageChunkSize();
       const ranges = partitionPageRanges(pageCount, chunkSize);
       const urlByPage = new Map<number, string>();
@@ -449,29 +466,21 @@ async function transcribePreparedFile(
         urlByPage.set(entry.pageIndex + 1, entry.url);
       }
 
+      const chunkConcurrency = getPageChunkConcurrency();
       const chunkResults: TranscribePageChunkResult[] = [];
       const failedRanges: string[] = [];
       for (
         let offset = 0;
         offset < ranges.length;
-        offset += PAGE_CHUNK_CONCURRENCY
+        offset += chunkConcurrency
       ) {
-        const batch = ranges.slice(offset, offset + PAGE_CHUNK_CONCURRENCY);
+        const batch = ranges.slice(offset, offset + chunkConcurrency);
         const settled = await Promise.allSettled(
           batch.map((range) =>
             transcribePageChunkStep({
               fileName: blob.name,
               promptTask,
-              pages: Array.from(
-                { length: range.endPage - range.startPage + 1 },
-                (_, index) => {
-                  const pageNumber = range.startPage + index;
-                  return {
-                    pageNumber,
-                    url: urlByPage.get(pageNumber) ?? "",
-                  };
-                },
-              ).filter((page) => page.url.length > 0),
+              pages: pagesForRange(range, urlByPage),
             }),
           ),
         );
@@ -496,7 +505,11 @@ async function transcribePreparedFile(
 
       if (failedRanges.length > 0) {
         throw new RetryableError(
-          `Page chunk transcription incomplete for ${blob.name}; failed page ranges: ${failedRanges.join(", ")}.`,
+          formatIncompleteChunkTranscriptionMessage(
+            blob.name,
+            failedRanges,
+            errors,
+          ),
         );
       }
 
@@ -605,20 +618,18 @@ async function transcribeWholeFileStep(input: {
 async function transcribePageChunkStep(input: {
   fileName: string;
   promptTask: "diplomatic-transcription" | "project-notebook";
-  pages: Array<{ pageNumber: number; url: string }>;
+  pages: PageImageRef[];
 }): Promise<TranscribePageChunkResult> {
   "use step";
 
   if (input.pages.length === 0) {
-    return {
-      pages: [],
-      model: "skipped",
-      promptVersion: "skipped",
-    };
+    throw new RetryableError(
+      `Page chunk transcription for ${input.fileName} has no rasterized pages.`,
+    );
   }
 
   try {
-    return await transcribePageChunk({
+    return await transcribePageChunkResilient({
       pages: input.pages,
       promptTask: input.promptTask,
     });
@@ -940,6 +951,42 @@ function buildResult(results: FileResult[]): ManualIngestResult {
   };
 }
 
+function pagesForRange(
+  range: PageRange,
+  urlByPage: Map<number, string>,
+): PageImageRef[] {
+  const pages: PageImageRef[] = [];
+  const missing: number[] = [];
+  for (let pageNumber = range.startPage; pageNumber <= range.endPage; pageNumber++) {
+    const url = urlByPage.get(pageNumber);
+    if (!url) {
+      missing.push(pageNumber);
+      continue;
+    }
+    pages.push({ pageNumber, url });
+  }
+  if (missing.length > 0) {
+    throw new RetryableError(
+      `Missing rasterized page images for pages ${missing.join(", ")}.`,
+    );
+  }
+  return pages;
+}
+
+function formatIncompleteChunkTranscriptionMessage(
+  fileName: string,
+  failedRanges: string[],
+  errors: TranscriptionError[],
+): string {
+  const causes = errors
+    .filter((entry) => entry.stage === "transcription")
+    .slice(0, 2)
+    .map((entry) => entry.message);
+  const causeSuffix =
+    causes.length > 0 ? ` Causes: ${causes.join("; ")}` : "";
+  return `Page chunk transcription incomplete for ${fileName}; failed page ranges: ${failedRanges.join(", ")}.${causeSuffix}`;
+}
+
 function findMissingTranscribedPages(
   chunkResults: TranscribePageChunkResult[],
   totalPages: number,
@@ -996,20 +1043,6 @@ async function fetchBlobBytes(blob: BlobRef): Promise<Uint8Array> {
   }
   const buffer = await response.arrayBuffer();
   return new Uint8Array(buffer);
-}
-
-function isTransientError(error: unknown): boolean {
-  if (!(error instanceof Error)) return false;
-  const message = error.message.toLowerCase();
-  return (
-    message.includes("timeout") ||
-    message.includes("timed out") ||
-    message.includes("rate limit") ||
-    message.includes("429") ||
-    message.includes("503") ||
-    message.includes("network") ||
-    message.includes("fetch failed")
-  );
 }
 
 async function emitEvent(event: BatchEvent): Promise<void> {

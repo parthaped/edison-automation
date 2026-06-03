@@ -9,8 +9,11 @@ export const LARGE_FILE_BYTES = 50 * 1024 * 1024;
 /** PDFs with at least this many pages use page-chunked transcription. */
 export const LARGE_PAGE_COUNT = 15;
 
-/** Parallel page-chunk transcribe steps within one file. */
-export const PAGE_CHUNK_CONCURRENCY = 3;
+/** Default parallel page-chunk transcribe steps within one file. */
+export const DEFAULT_PAGE_CHUNK_CONCURRENCY = 2;
+
+/** @deprecated Use getPageChunkConcurrency() */
+export const PAGE_CHUNK_CONCURRENCY = DEFAULT_PAGE_CHUNK_CONCURRENCY;
 
 export interface PageRange {
   startPage: number;
@@ -20,6 +23,15 @@ export interface PageRange {
 export function getPageChunkSize(env: NodeJS.ProcessEnv = process.env): number {
   const raw = Number(env.EDISON_PAGE_CHUNK_SIZE);
   return Number.isFinite(raw) && raw >= 1 ? Math.floor(raw) : DEFAULT_PAGE_CHUNK_SIZE;
+}
+
+export function getPageChunkConcurrency(
+  env: NodeJS.ProcessEnv = process.env,
+): number {
+  const raw = Number(env.EDISON_PAGE_CHUNK_CONCURRENCY);
+  return Number.isFinite(raw) && raw >= 1
+    ? Math.floor(raw)
+    : DEFAULT_PAGE_CHUNK_CONCURRENCY;
 }
 
 export function shouldUsePageChunkedTranscription(input: {

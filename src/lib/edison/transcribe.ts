@@ -1,5 +1,6 @@
 import { generateText, Output } from "ai";
 import { z } from "zod";
+import { combineSignals, getRequestTimeoutMs } from "./ai-request";
 import { transcribeWithLocalOcr } from "./local-ocr";
 import { getActivePrompt, type TranscriptionPromptTask } from "./prompts";
 
@@ -21,12 +22,6 @@ const SUPPORTED_PDF_MIME_TYPE = "application/pdf";
 // EDISON_OCR_MODEL environment variable. A single call now produces both the
 // transcription and the structured metadata.
 const DEFAULT_OCR_MODEL = "google/gemini-2.5-flash";
-// Must stay below the serverless function ceiling (60s on the Hobby plan) so a
-// slow model call aborts cleanly and is caught as a retryable error instead of
-// the platform killing the whole step mid-request. Override with
-// EDISON_AI_TIMEOUT_MS on plans with a larger maxDuration.
-const DEFAULT_TIMEOUT_MS = 45_000;
-
 export type TranscribableMediaType =
   | "image/jpeg"
   | "image/jpg"
@@ -47,34 +42,6 @@ export function getDefaultOcrModel(env: NodeJS.ProcessEnv = process.env): string
 
 function getLocalOcrUrl(env: NodeJS.ProcessEnv = process.env): string | undefined {
   return env.EDISON_LOCAL_OCR_URL?.trim() || undefined;
-}
-
-function getRequestTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
-  const raw = Number(env.EDISON_AI_TIMEOUT_MS);
-  return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_TIMEOUT_MS;
-}
-
-function combineSignals(
-  external: AbortSignal | undefined,
-  timeoutMs: number,
-): { signal: AbortSignal; cleanup: () => void } {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(new Error("AI request timed out")), timeoutMs);
-  const onAbort = () => controller.abort(external?.reason);
-  if (external) {
-    if (external.aborted) {
-      controller.abort(external.reason);
-    } else {
-      external.addEventListener("abort", onAbort, { once: true });
-    }
-  }
-  return {
-    signal: controller.signal,
-    cleanup: () => {
-      clearTimeout(timer);
-      external?.removeEventListener("abort", onAbort);
-    },
-  };
 }
 
 export interface TranscribeDocumentInput {

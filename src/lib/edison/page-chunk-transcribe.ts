@@ -1,5 +1,12 @@
 import { generateText, Output } from "ai";
 import { z } from "zod";
+import {
+  combineSignals,
+  getRequestTimeoutMs,
+  isTransientError,
+  retryBackoffMs,
+  sleepMs,
+} from "./ai-request";
 import type { TranscriptionPromptTask } from "./prompts";
 import { getActivePrompt } from "./prompts";
 import {
@@ -112,6 +119,39 @@ export async function fetchImageBytes(url: string): Promise<Uint8Array> {
   return new Uint8Array(buffer);
 }
 
+const MAX_CHUNK_ATTEMPTS = 3;
+
+export function findMissingPagesInChunkResult(
+  requested: PageImageRef[],
+  result: TranscribePageChunkResult,
+): number[] {
+  const seen = new Set(result.pages.map((page) => page.pageNumber));
+  return requested
+    .map((page) => page.pageNumber)
+    .filter((pageNumber) => !seen.has(pageNumber));
+}
+
+function mergeChunkResults(
+  left: TranscribePageChunkResult,
+  right: TranscribePageChunkResult,
+): TranscribePageChunkResult {
+  const inputTokens = (left.inputTokens ?? 0) + (right.inputTokens ?? 0);
+  const outputTokens = (left.outputTokens ?? 0) + (right.outputTokens ?? 0);
+  return {
+    pages: [...left.pages, ...right.pages].sort(
+      (a, b) => a.pageNumber - b.pageNumber,
+    ),
+    model: left.model,
+    promptVersion: left.promptVersion,
+    inputTokens: inputTokens > 0 ? inputTokens : undefined,
+    outputTokens: outputTokens > 0 ? outputTokens : undefined,
+  };
+}
+
+function toError(value: unknown): Error {
+  return value instanceof Error ? value : new Error(String(value));
+}
+
 export async function transcribePageChunk(
   input: TranscribePageChunkInput,
 ): Promise<TranscribePageChunkResult> {
@@ -131,37 +171,110 @@ export async function transcribePageChunk(
     }),
   );
 
-  const result = await generateText({
-    model,
-    abortSignal: input.signal,
-    output: Output.object({ schema: pageChunkSchema }),
-    messages: [
-      {
-        role: "user",
-        content: [
-          {
-            type: "text",
-            text: `${activePrompt.prompt}\n\n${PAGE_CHUNK_INSTRUCTION}\n\nPages in this batch: ${input.pages.map((p) => p.pageNumber).join(", ")}.`,
-          },
-          ...imageParts,
-        ],
-      },
-    ],
-  });
+  const { signal, cleanup } = combineSignals(
+    input.signal,
+    getRequestTimeoutMs(),
+  );
+  try {
+    const result = await generateText({
+      model,
+      abortSignal: signal,
+      output: Output.object({ schema: pageChunkSchema }),
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: `${activePrompt.prompt}\n\n${PAGE_CHUNK_INSTRUCTION}\n\nPages in this batch: ${input.pages.map((p) => p.pageNumber).join(", ")}.`,
+            },
+            ...imageParts,
+          ],
+        },
+      ],
+    });
 
-  return {
-    pages: (result.output.pages ?? [])
-      .slice()
-      .sort((a, b) => a.pageNumber - b.pageNumber)
-      .map((entry) => ({
-        pageNumber: entry.pageNumber,
-        text: (entry.transcription ?? "").trim(),
-      })),
-    model,
-    promptVersion: activePrompt.version,
-    inputTokens: result.usage?.inputTokens,
-    outputTokens: result.usage?.outputTokens,
-  };
+    return {
+      pages: (result.output.pages ?? [])
+        .slice()
+        .sort((a, b) => a.pageNumber - b.pageNumber)
+        .map((entry) => ({
+          pageNumber: entry.pageNumber,
+          text: (entry.transcription ?? "").trim(),
+        })),
+      model,
+      promptVersion: activePrompt.version,
+      inputTokens: result.usage?.inputTokens,
+      outputTokens: result.usage?.outputTokens,
+    };
+  } finally {
+    cleanup();
+  }
+}
+
+export type TranscribePageChunkFn = (
+  input: TranscribePageChunkInput,
+) => Promise<TranscribePageChunkResult>;
+
+export interface TranscribePageChunkResilientOptions {
+  /** Override for tests; defaults to transcribePageChunk. */
+  transcribe?: TranscribePageChunkFn;
+}
+
+export async function transcribePageChunkResilient(
+  input: TranscribePageChunkInput,
+  options: TranscribePageChunkResilientOptions = {},
+): Promise<TranscribePageChunkResult> {
+  const transcribe = options.transcribe ?? transcribePageChunk;
+  if (input.pages.length === 0) {
+    throw new Error("transcribePageChunkResilient requires at least one page.");
+  }
+
+  let lastError: unknown;
+  for (let attempt = 0; attempt < MAX_CHUNK_ATTEMPTS; attempt++) {
+    try {
+      const result = await transcribe(input);
+      const missing = findMissingPagesInChunkResult(input.pages, result);
+      if (missing.length === 0) {
+        return result;
+      }
+      lastError = new Error(`Model omitted pages: ${missing.join(", ")}`);
+    } catch (error) {
+      lastError = error;
+    }
+
+    const err = toError(lastError);
+    const canRetry =
+      attempt < MAX_CHUNK_ATTEMPTS - 1 &&
+      (isTransientError(err) ||
+        err.message.toLowerCase().includes("omitted pages"));
+    if (canRetry) {
+      await sleepMs(retryBackoffMs(attempt));
+      continue;
+    }
+    break;
+  }
+
+  if (input.pages.length === 1) {
+    throw toError(lastError);
+  }
+
+  const mid = Math.ceil(input.pages.length / 2);
+  const left = await transcribePageChunkResilient(
+    {
+      ...input,
+      pages: input.pages.slice(0, mid),
+    },
+    options,
+  );
+  const right = await transcribePageChunkResilient(
+    {
+      ...input,
+      pages: input.pages.slice(mid),
+    },
+    options,
+  );
+  return mergeChunkResults(left, right);
 }
 
 export async function extractDocumentMetadataFromSample(input: {
