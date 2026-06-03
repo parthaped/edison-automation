@@ -33,7 +33,7 @@ describe("transcribePageChunkResilient", () => {
     vi.spyOn(aiRequest, "sleepMs").mockResolvedValue(undefined);
     const transcribe: TranscribePageChunkFn = async (input) => {
       if (input.pages.length > 4) {
-        throw new Error("rate limit 429");
+        throw new Error("request payload too large");
       }
       return {
         pages: input.pages.map((page) => ({

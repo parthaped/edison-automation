@@ -33,28 +33,61 @@ export function combineSignals(
   };
 }
 
-export function isTransientError(error: unknown): boolean {
-  if (!(error instanceof Error)) return false;
-  const message = error.message.toLowerCase();
+function collectErrorMessages(error: unknown): string[] {
+  const messages: string[] = [];
+  let current: unknown = error;
+  for (let depth = 0; depth < 5 && current; depth++) {
+    if (current instanceof Error) {
+      messages.push(current.message);
+      current = current.cause;
+    } else if (typeof current === "string") {
+      messages.push(current);
+      break;
+    } else {
+      messages.push(String(current));
+      break;
+    }
+  }
+  return messages;
+}
+
+export function isRateLimitError(error: unknown): boolean {
+  const combined = collectErrorMessages(error).join(" ").toLowerCase();
   return (
-    message.includes("timeout") ||
-    message.includes("timed out") ||
-    message.includes("rate limit") ||
-    message.includes("429") ||
-    message.includes("500") ||
-    message.includes("502") ||
-    message.includes("503") ||
-    message.includes("504") ||
-    message.includes("overloaded") ||
-    message.includes("resource exhausted") ||
-    message.includes("unavailable") ||
-    message.includes("internal server") ||
-    message.includes("network") ||
-    message.includes("fetch failed") ||
-    message.includes("econnreset") ||
-    message.includes("socket") ||
-    message.includes("aborted")
+    combined.includes("rate-limited") ||
+    combined.includes("rate limit") ||
+    combined.includes("429") ||
+    combined.includes("free tier")
   );
+}
+
+export function isTransientError(error: unknown): boolean {
+  if (isRateLimitError(error)) return true;
+  const combined = collectErrorMessages(error).join(" ").toLowerCase();
+  return (
+    combined.includes("timeout") ||
+    combined.includes("timed out") ||
+    combined.includes("429") ||
+    combined.includes("500") ||
+    combined.includes("502") ||
+    combined.includes("503") ||
+    combined.includes("504") ||
+    combined.includes("overloaded") ||
+    combined.includes("resource exhausted") ||
+    combined.includes("unavailable") ||
+    combined.includes("internal server") ||
+    combined.includes("network") ||
+    combined.includes("fetch failed") ||
+    combined.includes("econnreset") ||
+    combined.includes("socket") ||
+    combined.includes("aborted")
+  );
+}
+
+/** Longer backoff for gateway free-tier / quota rate limits. */
+export function rateLimitBackoffMs(attemptIndex: number): number {
+  const steps = [5000, 15000, 30000];
+  return steps[Math.min(attemptIndex, steps.length - 1)] ?? 30000;
 }
 
 export function sleepMs(ms: number): Promise<void> {

@@ -40,9 +40,9 @@ describe("shouldUsePageChunkedTranscription", () => {
 });
 
 describe("getPageChunkConcurrency", () => {
-  it("defaults to 2 parallel chunk steps", () => {
+  it("defaults to 1 parallel chunk step for free-tier safety", () => {
     expect(getPageChunkConcurrency()).toBe(DEFAULT_PAGE_CHUNK_CONCURRENCY);
-    expect(getPageChunkConcurrency()).toBe(2);
+    expect(getPageChunkConcurrency()).toBe(1);
   });
 
   it("reads EDISON_PAGE_CHUNK_CONCURRENCY when set", () => {

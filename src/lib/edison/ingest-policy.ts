@@ -9,8 +9,11 @@ export const LARGE_FILE_BYTES = 50 * 1024 * 1024;
 /** PDFs with at least this many pages use page-chunked transcription. */
 export const LARGE_PAGE_COUNT = 15;
 
-/** Default parallel page-chunk transcribe steps within one file. */
-export const DEFAULT_PAGE_CHUNK_CONCURRENCY = 2;
+/** Default parallel page-chunk transcribe steps within one file (1 avoids AI Gateway free-tier bursts). */
+export const DEFAULT_PAGE_CHUNK_CONCURRENCY = 1;
+
+/** Pause between chunk step batches to reduce rate-limit errors (ms). */
+export const DEFAULT_PAGE_CHUNK_BATCH_DELAY_MS = 3000;
 
 /** @deprecated Use getPageChunkConcurrency() */
 export const PAGE_CHUNK_CONCURRENCY = DEFAULT_PAGE_CHUNK_CONCURRENCY;
@@ -32,6 +35,15 @@ export function getPageChunkConcurrency(
   return Number.isFinite(raw) && raw >= 1
     ? Math.floor(raw)
     : DEFAULT_PAGE_CHUNK_CONCURRENCY;
+}
+
+export function getPageChunkBatchDelayMs(
+  env: NodeJS.ProcessEnv = process.env,
+): number {
+  const raw = Number(env.EDISON_PAGE_CHUNK_BATCH_DELAY_MS);
+  return Number.isFinite(raw) && raw >= 0
+    ? Math.floor(raw)
+    : DEFAULT_PAGE_CHUNK_BATCH_DELAY_MS;
 }
 
 export function shouldUsePageChunkedTranscription(input: {

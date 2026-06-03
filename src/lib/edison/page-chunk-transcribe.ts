@@ -3,7 +3,9 @@ import { z } from "zod";
 import {
   combineSignals,
   getRequestTimeoutMs,
+  isRateLimitError,
   isTransientError,
+  rateLimitBackoffMs,
   retryBackoffMs,
   sleepMs,
 } from "./ai-request";
@@ -244,19 +246,67 @@ export async function transcribePageChunkResilient(
     }
 
     const err = toError(lastError);
+    const rateLimited = isRateLimitError(err);
     const canRetry =
       attempt < MAX_CHUNK_ATTEMPTS - 1 &&
       (isTransientError(err) ||
         err.message.toLowerCase().includes("omitted pages"));
     if (canRetry) {
-      await sleepMs(retryBackoffMs(attempt));
+      // #region agent log
+      fetch("http://127.0.0.1:7887/ingest/318da917-cfb1-40e4-ab12-d2bd647284d9", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Debug-Session-Id": "7a3fdc",
+        },
+        body: JSON.stringify({
+          sessionId: "7a3fdc",
+          hypothesisId: "H1-H3",
+          location: "page-chunk-transcribe.ts:resilient-retry",
+          message: "chunk retry after failure",
+          data: {
+            pageCount: input.pages.length,
+            attempt,
+            rateLimited,
+            transient: isTransientError(err),
+            errorSnippet: err.message.slice(0, 120),
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
+      await sleepMs(
+        rateLimited ? rateLimitBackoffMs(attempt) : retryBackoffMs(attempt),
+      );
       continue;
     }
     break;
   }
 
+  const err = toError(lastError);
+  if (isRateLimitError(err)) {
+    // #region agent log
+    fetch("http://127.0.0.1:7887/ingest/318da917-cfb1-40e4-ab12-d2bd647284d9", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Debug-Session-Id": "7a3fdc",
+      },
+      body: JSON.stringify({
+        sessionId: "7a3fdc",
+        hypothesisId: "H3",
+        location: "page-chunk-transcribe.ts:rate-limit-no-split",
+        message: "rate limit exhausted retries; skip binary split",
+        data: { pageCount: input.pages.length },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
+    throw err;
+  }
+
   if (input.pages.length === 1) {
-    throw toError(lastError);
+    throw err;
   }
 
   const mid = Math.ceil(input.pages.length / 2);
