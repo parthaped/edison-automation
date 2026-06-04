@@ -18,12 +18,25 @@ export function getAppEnv(source: NodeJS.ProcessEnv = process.env): AppEnv {
   return envSchema.parse(source);
 }
 
-export function getRuntimeCapabilities(env = getAppEnv()) {
+export function getRuntimeCapabilities(
+  env = getAppEnv(),
+  source: NodeJS.ProcessEnv = process.env,
+) {
+  const localOcr = Boolean(source.EDISON_LOCAL_OCR_URL?.trim());
+  const gateway = Boolean(env.AI_GATEWAY_API_KEY?.trim());
   return {
     storage: env.DATABASE_URL ? "database-configured" : "development-memory-store",
     files: env.BLOB_READ_WRITE_TOKEN ? "object-storage-configured" : "local-or-deferred-storage",
     box: env.BOX_CLIENT_ID && env.BOX_CLIENT_SECRET ? "configured" : "not-configured",
-    ai: env.AI_GATEWAY_API_KEY ? "configured" : "not-configured",
+    ai:
+      gateway || localOcr
+        ? localOcr && !gateway
+          ? "local-ocr-configured"
+          : localOcr && gateway
+            ? "local-ocr-and-gateway-configured"
+            : "configured"
+        : "not-configured",
+    localOcr: localOcr ? "configured" : "not-configured",
     omeka: env.OMEKA_API_BASE_URL ? "public-api-configured" : "not-configured",
   };
 }

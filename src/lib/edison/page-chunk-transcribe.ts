@@ -15,6 +15,8 @@ import { transcribePagesWithLocalOcr } from "./local-ocr";
 import { isLocalOcrEnabled } from "./ocr-provider";
 import type { TranscriptionPromptTask } from "./prompts";
 import { getActivePrompt } from "./prompts";
+import { isLocalOcrEnabled } from "./local-ocr-config";
+import { transcribePageImageWithLocalOcr } from "./local-ocr";
 import {
   getDefaultOcrModel,
   type SubDocumentResult,
@@ -166,23 +168,43 @@ export async function transcribePageChunk(
   const promptTask = input.promptTask ?? "diplomatic-transcription";
 
   if (isLocalOcrEnabled()) {
-    const pageBytes = await Promise.all(
-      input.pages.map(async (page) => ({
-        pageNumber: page.pageNumber,
-        bytes: await fetchImageBytes(page.url),
-        mediaType: "image/jpeg" as const,
-      })),
+    const { signal, cleanup } = combineSignals(
+      input.signal,
+      getRequestTimeoutMs(),
     );
-    const krakenResult = await transcribePagesWithLocalOcr({
-      pages: pageBytes,
-      promptTask,
-      signal: input.signal,
-    });
-    return reformatPageChunkWithGateway(krakenResult, {
-      promptTask,
-      documentId: input.documentId,
-      signal: input.signal,
-    });
+    try {
+      const pageResults = await Promise.all(
+        input.pages.map(async (page) => {
+          const bytes = await fetchImageBytes(page.url);
+          const result = await transcribePageImageWithLocalOcr({
+            bytes,
+            mediaType: "image/jpeg",
+            signal,
+          });
+          return {
+            pageNumber: page.pageNumber,
+            text: result.text,
+            model: result.model,
+            promptVersion: result.promptVersion,
+          };
+        }),
+      );
+      const model = pageResults[0]?.model ?? "local/kraken";
+      const promptVersion =
+        pageResults[0]?.promptVersion ?? "local-kraken-v1";
+      return {
+        pages: pageResults
+          .map((entry) => ({
+            pageNumber: entry.pageNumber,
+            text: entry.text.trim(),
+          }))
+          .sort((a, b) => a.pageNumber - b.pageNumber),
+        model,
+        promptVersion,
+      };
+    } finally {
+      cleanup();
+    }
   }
 
   const model = input.model ?? getDefaultOcrModel();

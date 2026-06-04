@@ -9,7 +9,8 @@ export const metadata = {
 
 export default function UploadPage() {
   const capabilities = getRuntimeCapabilities();
-  const aiReady = capabilities.ai === "configured";
+  const aiReady = capabilities.ai !== "not-configured";
+  const localOcrOnly = capabilities.ai === "local-ocr-configured";
   const blobReady = capabilities.files === "object-storage-configured";
 
   return (
@@ -23,12 +24,22 @@ export default function UploadPage() {
           {!aiReady ? (
             <CapabilityNotice>
               <strong className="font-semibold">
-                AI Gateway is not configured.
+                Transcription is not configured.
               </strong>{" "}
-              Set <code className="font-mono">AI_GATEWAY_API_KEY</code> in{" "}
+              Set <code className="font-mono">AI_GATEWAY_API_KEY</code> and/or{" "}
+              <code className="font-mono">EDISON_LOCAL_OCR_URL</code> in{" "}
               <code className="font-mono">.env.local</code> and restart the dev
-              server to enable transcription and metadata extraction. Uploads
-              are still accepted, but transcriptions will be empty.
+              server. Uploads are still accepted, but transcriptions will be
+              empty.
+            </CapabilityNotice>
+          ) : null}
+
+          {localOcrOnly ? (
+            <CapabilityNotice>
+              <strong className="font-semibold">Local OCR only.</strong> Page
+              transcription uses <code className="font-mono">EDISON_LOCAL_OCR_URL</code>
+              . Set <code className="font-mono">AI_GATEWAY_API_KEY</code> as well
+              for post-transcribe document splitting on large PDFs.
             </CapabilityNotice>
           ) : null}
 
@@ -46,7 +57,8 @@ export default function UploadPage() {
           ) : null}
 
           <p className="text-[13px] text-muted-foreground">
-            Pipeline: each file is transcribed through the AI Gateway, indexed
+            Pipeline: each file is transcribed (AI Gateway and/or local Kraken
+            OCR), indexed
             for document type, date, authors, recipients, names, and subjects,
             then bundled for download and queued for review. Need image-file
             lists from{" "}

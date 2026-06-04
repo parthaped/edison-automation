@@ -1,11 +1,49 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as aiRequest from "./ai-request";
+import * as localOcr from "./local-ocr";
+import * as pageChunk from "./page-chunk-transcribe";
 import {
   findMissingPagesInChunkResult,
   mergePageChunkResults,
   type TranscribePageChunkFn,
   transcribePageChunkResilient,
 } from "./page-chunk-transcribe";
+
+describe("transcribePageChunk with local OCR", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+
+  it("uses local Kraken per page instead of generateText", async () => {
+    vi.stubEnv("EDISON_LOCAL_OCR_URL", "http://127.0.0.1:8787/transcribe");
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
+      new Response(new Uint8Array([1]), { status: 200 }),
+    );
+    const localSpy = vi
+      .spyOn(localOcr, "transcribePageImageWithLocalOcr")
+      .mockImplementation(async (input) => ({
+        text: `text-${input.bytes[0]}`,
+        model: "local/kraken-en_best-v1",
+        promptVersion: "local-kraken-v1",
+      }));
+
+    const result = await pageChunk.transcribePageChunk({
+      pages: [
+        { pageNumber: 2, url: "http://example.test/b" },
+        { pageNumber: 1, url: "http://example.test/a" },
+      ],
+    });
+
+    expect(localSpy).toHaveBeenCalledTimes(2);
+    expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+    expect(result.model).toBe("local/kraken-en_best-v1");
+    expect(result.pages).toEqual([
+      { pageNumber: 1, text: "text-1" },
+      { pageNumber: 2, text: "text-1" },
+    ]);
+  });
+});
 
 describe("findMissingPagesInChunkResult", () => {
   it("lists requested pages absent from the model output", () => {

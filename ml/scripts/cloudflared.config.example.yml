@@ -1,0 +1,12 @@
+# Example Cloudflare Tunnel ingress for Edison Kraken OCR.
+# Copy to %USERPROFILE%\.cloudflared\config.yml and replace placeholders.
+#
+# Docs: ml/docs/kraken-local-ocr.md
+
+tunnel: <your-tunnel-id>
+credentials-file: C:\Users\<you>\.cloudflared\<your-tunnel-id>.json
+
+ingress:
+  - hostname: ocr.example.com
+    service: http://127.0.0.1:8787
+  - service: http_status:404

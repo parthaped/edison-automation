@@ -27,6 +27,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output", type=Path, default=Path("ml/reports/benchmark_predictions.jsonl"))
     parser.add_argument("--models", default="trocr-small,trocr-base,grm-ocr")
     parser.add_argument("--kraken-model", type=Path, default=Path("ml/models/edison-htr.mlmodel"))
+    parser.add_argument("--kraken-device", default="cuda:0")
+    parser.add_argument("--kraken-batch-size", type=int, default=16)
+    parser.add_argument("--kraken-precision", default="bf16-mixed")
+    parser.add_argument("--kraken-num-line-workers", type=int, default=4)
     return parser.parse_args()
 
 
@@ -86,38 +90,49 @@ def grm_ocr_predictor() -> PredictionFn:
     return predict
 
 
-def kraken_predictor(model_path: Path) -> PredictionFn:
+def kraken_predictor(
+    model_path: Path,
+    device: str,
+    batch_size: int,
+    precision: str,
+    num_line_workers: int,
+) -> PredictionFn:
     if not model_path.exists():
         raise RuntimeError(f"Kraken model does not exist: {model_path}")
     if subprocess.run(["kraken", "--help"], capture_output=True).returncode != 0:
         raise RuntimeError("kraken CLI is not installed")
 
     def predict(row: dict[str, object]) -> str:
-        with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as handle:
-            output_path = Path(handle.name)
-        try:
-            subprocess.run(
-                [
-                    "kraken",
-                    "-i",
-                    str(row["image_path"]),
-                    str(output_path),
-                    "ocr",
-                    "-m",
-                    str(model_path),
-                ],
-                check=True,
-                capture_output=True,
-                text=True,
-            )
-            return output_path.read_text(encoding="utf-8").strip()
-        finally:
-            output_path.unlink(missing_ok=True)
+        result = subprocess.run(
+            [
+                "kraken",
+                "-i",
+                str(row["image_path"]),
+                "stdout",
+                "--device",
+                device,
+                "--precision",
+                precision,
+                "segment",
+                "-bl",
+                "ocr",
+                "-m",
+                str(model_path),
+                "-B",
+                str(batch_size),
+                "--num-line-workers",
+                str(num_line_workers),
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        return (result.stdout or "").strip()
 
     return predict
 
 
-def build_predictor(name: str, kraken_model: Path) -> tuple[str, PredictionFn]:
+def build_predictor(name: str, args: argparse.Namespace) -> tuple[str, PredictionFn]:
     if name == "trocr-small":
         return "microsoft/trocr-small-handwritten", trocr_predictor("microsoft/trocr-small-handwritten")
     if name == "trocr-base":
@@ -125,7 +140,16 @@ def build_predictor(name: str, kraken_model: Path) -> tuple[str, PredictionFn]:
     if name == "grm-ocr":
         return "OrionLLM/GRM-OCR", grm_ocr_predictor()
     if name == "kraken":
-        return f"kraken/{kraken_model.name}", kraken_predictor(kraken_model)
+        return (
+            f"kraken/{args.kraken_model.name}",
+            kraken_predictor(
+                args.kraken_model,
+                args.kraken_device,
+                args.kraken_batch_size,
+                args.kraken_precision,
+                args.kraken_num_line_workers,
+            ),
+        )
     raise RuntimeError(f"Unknown benchmark model adapter: {name}")
 
 
@@ -140,7 +164,7 @@ def main() -> int:
     with args.output.open("w", encoding="utf-8") as handle:
         for selected_name in selected:
             try:
-                model_label, predict = build_predictor(selected_name, args.kraken_model)
+                model_label, predict = build_predictor(selected_name, args)
             except RuntimeError as error:
                 print(f"Skipping {selected_name}: {error}", file=sys.stderr)
                 continue

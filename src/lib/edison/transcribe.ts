@@ -1,6 +1,7 @@
 import { generateText, Output } from "ai";
 import { z } from "zod";
 import { combineSignals, getRequestTimeoutMs } from "./ai-request";
+import { getLocalOcrUrl } from "./local-ocr-config";
 import { transcribeWithLocalOcr } from "./local-ocr";
 import { getActivePrompt, type TranscriptionPromptTask } from "./prompts";
 
@@ -38,10 +39,6 @@ export function isTranscribableMediaType(mimeType: string): boolean {
 
 export function getDefaultOcrModel(env: NodeJS.ProcessEnv = process.env): string {
   return env.EDISON_OCR_MODEL ?? DEFAULT_OCR_MODEL;
-}
-
-function getLocalOcrUrl(env: NodeJS.ProcessEnv = process.env): string | undefined {
-  return env.EDISON_LOCAL_OCR_URL?.trim() || undefined;
 }
 
 export interface TranscribeDocumentInput {

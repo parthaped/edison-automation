@@ -12,6 +12,10 @@ This workspace keeps dataset harvesting, OCR/HTR training, evaluation, and local
 6. Train and benchmark Kraken, TrOCR, GRM-OCR, and the current gateway baseline.
 7. Serve or import local OCR output through the app's transcription result contract.
 
+### Local Kraken OCR (CUDA laptop + Cloudflare Tunnel)
+
+See [docs/kraken-local-ocr.md](docs/kraken-local-ocr.md) for T1200 setup, `serve_kraken_ocr.py`, tunnel wiring, and Vercel env vars (`EDISON_LOCAL_OCR_URL`, `EDISON_LOCAL_OCR_SECRET`).
+
 ## First Run
 
 Create a seed file with one folder ID per line:
