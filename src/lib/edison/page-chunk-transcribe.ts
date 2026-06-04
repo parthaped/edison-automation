@@ -1,4 +1,5 @@
 import { generateText, Output } from "ai";
+import { fetch } from "workflow";
 import { z } from "zod";
 import {
   combineSignals,
@@ -9,6 +10,9 @@ import {
   retryBackoffMs,
   sleepMs,
 } from "./ai-request";
+import { reformatPageChunkWithGateway } from "./kraken-reformat";
+import { transcribePagesWithLocalOcr } from "./local-ocr";
+import { isLocalOcrEnabled } from "./ocr-provider";
 import type { TranscriptionPromptTask } from "./prompts";
 import { getActivePrompt } from "./prompts";
 import {
@@ -90,6 +94,8 @@ export interface TranscribePageChunkInput {
   promptTask?: TranscriptionPromptTask;
   model?: string;
   signal?: AbortSignal;
+  /** Used for Edison Markdown ## page headings during Kraken→Gemini reformat. */
+  documentId?: string;
 }
 
 export interface TranscribePageChunkResult {
@@ -157,10 +163,30 @@ function toError(value: unknown): Error {
 export async function transcribePageChunk(
   input: TranscribePageChunkInput,
 ): Promise<TranscribePageChunkResult> {
+  const promptTask = input.promptTask ?? "diplomatic-transcription";
+
+  if (isLocalOcrEnabled()) {
+    const pageBytes = await Promise.all(
+      input.pages.map(async (page) => ({
+        pageNumber: page.pageNumber,
+        bytes: await fetchImageBytes(page.url),
+        mediaType: "image/jpeg" as const,
+      })),
+    );
+    const krakenResult = await transcribePagesWithLocalOcr({
+      pages: pageBytes,
+      promptTask,
+      signal: input.signal,
+    });
+    return reformatPageChunkWithGateway(krakenResult, {
+      promptTask,
+      documentId: input.documentId,
+      signal: input.signal,
+    });
+  }
+
   const model = input.model ?? getDefaultOcrModel();
-  const activePrompt = getActivePrompt(
-    input.promptTask ?? "diplomatic-transcription",
-  );
+  const activePrompt = getActivePrompt(promptTask);
 
   const imageParts = await Promise.all(
     input.pages.map(async (page) => {
@@ -252,29 +278,6 @@ export async function transcribePageChunkResilient(
       (isTransientError(err) ||
         err.message.toLowerCase().includes("omitted pages"));
     if (canRetry) {
-      // #region agent log
-      fetch("http://127.0.0.1:7887/ingest/318da917-cfb1-40e4-ab12-d2bd647284d9", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Debug-Session-Id": "7a3fdc",
-        },
-        body: JSON.stringify({
-          sessionId: "7a3fdc",
-          hypothesisId: "H1-H3",
-          location: "page-chunk-transcribe.ts:resilient-retry",
-          message: "chunk retry after failure",
-          data: {
-            pageCount: input.pages.length,
-            attempt,
-            rateLimited,
-            transient: isTransientError(err),
-            errorSnippet: err.message.slice(0, 120),
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
       await sleepMs(
         rateLimited ? rateLimitBackoffMs(attempt) : retryBackoffMs(attempt),
       );
@@ -284,24 +287,7 @@ export async function transcribePageChunkResilient(
   }
 
   const err = toError(lastError);
-  if (isRateLimitError(err)) {
-    // #region agent log
-    fetch("http://127.0.0.1:7887/ingest/318da917-cfb1-40e4-ab12-d2bd647284d9", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Debug-Session-Id": "7a3fdc",
-      },
-      body: JSON.stringify({
-        sessionId: "7a3fdc",
-        hypothesisId: "H3",
-        location: "page-chunk-transcribe.ts:rate-limit-no-split",
-        message: "rate limit exhausted retries; skip binary split",
-        data: { pageCount: input.pages.length },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
+  if (isRateLimitError(err) && !isLocalOcrEnabled()) {
     throw err;
   }
 

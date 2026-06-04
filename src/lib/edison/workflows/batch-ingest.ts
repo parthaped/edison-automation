@@ -3,6 +3,8 @@ import {
   FatalError,
   RetryableError,
   getWritable,
+  fetch,
+  sleep,
 } from "workflow";
 import { createExtractionPlan, type ExtractionPlan } from "../extraction";
 import {
@@ -10,7 +12,11 @@ import {
   defaultFolderIdFromFileName,
   normalizeFolderId,
 } from "../id-policy";
-import { isRateLimitError, isTransientError, sleepMs } from "../ai-request";
+import { isTransientError } from "../ai-request";
+import {
+  isTranscriptionEnabled,
+  shouldUseGatewayForMetadata,
+} from "../ocr-provider";
 import {
   effectiveFileConcurrency,
   getPageChunkBatchDelayMs,
@@ -92,7 +98,7 @@ export async function batchIngestWorkflow(
 ): Promise<ManualIngestResult> {
   "use workflow";
 
-  const aiEnabled = Boolean(process.env.AI_GATEWAY_API_KEY);
+  const aiEnabled = isTranscriptionEnabled();
   const maxConcurrency = effectiveFileConcurrency(
     input.blobs,
     BASE_MAX_CONCURRENCY,
@@ -177,6 +183,7 @@ async function processOneFile(input: ProcessOneFileInput): Promise<FileResult> {
 
   const transcribed = await transcribePreparedFile({
     blob,
+    documentId,
     promptTask,
     aiEnabled,
     pageImageUrls: prepared.urls,
@@ -407,6 +414,7 @@ async function deleteSourceBlobStep(input: {
 
 interface TranscribePreparedFileInput {
   blob: BlobRef;
+  documentId: string;
   promptTask: "diplomatic-transcription" | "project-notebook";
   aiEnabled: boolean;
   pageImageUrls: PageImageUrl[];
@@ -427,7 +435,8 @@ async function transcribePreparedFile(
   input: TranscribePreparedFileInput,
 ): Promise<TranscribeFileStepResult> {
   const transcribeStarted = Date.now();
-  const { blob, promptTask, aiEnabled, pageImageUrls, extractionPlan } = input;
+  const { blob, documentId, promptTask, aiEnabled, pageImageUrls, extractionPlan } =
+    input;
   const errors: TranscriptionError[] = [];
 
   if (!aiEnabled || !isTranscribableMediaType(blob.contentType)) {
@@ -477,36 +486,14 @@ async function transcribePreparedFile(
         offset += chunkConcurrency
       ) {
         if (offset > 0 && batchDelayMs > 0) {
-          await sleepMs(batchDelayMs);
+          await sleep(batchDelayMs);
         }
         const batch = ranges.slice(offset, offset + chunkConcurrency);
-        // #region agent log
-        fetch("http://127.0.0.1:7887/ingest/318da917-cfb1-40e4-ab12-d2bd647284d9", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-Debug-Session-Id": "7a3fdc",
-          },
-          body: JSON.stringify({
-            sessionId: "7a3fdc",
-            hypothesisId: "H2",
-            location: "batch-ingest.ts:chunk-wave",
-            message: "starting chunk wave",
-            data: {
-              fileName: blob.name,
-              offset,
-              concurrency: chunkConcurrency,
-              batchDelayMs,
-              ranges: batch.map((r) => `${r.startPage}-${r.endPage}`),
-            },
-            timestamp: Date.now(),
-          }),
-        }).catch(() => {});
-        // #endregion
         const settled = await Promise.allSettled(
           batch.map((range) =>
             transcribePageChunkStep({
               fileName: blob.name,
+              documentId,
               promptTask,
               pages: pagesForRange(range, urlByPage),
             }),
@@ -521,28 +508,6 @@ async function transcribePreparedFile(
               outcome.reason instanceof Error
                 ? outcome.reason.message
                 : String(outcome.reason);
-            // #region agent log
-            fetch("http://127.0.0.1:7887/ingest/318da917-cfb1-40e4-ab12-d2bd647284d9", {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                "X-Debug-Session-Id": "7a3fdc",
-              },
-              body: JSON.stringify({
-                sessionId: "7a3fdc",
-                hypothesisId: "H1-H4",
-                location: "batch-ingest.ts:chunk-failed",
-                message: "chunk step rejected",
-                data: {
-                  range: `${range.startPage}-${range.endPage}`,
-                  rateLimited: isRateLimitError(outcome.reason),
-                  transient: isTransientError(outcome.reason),
-                  errorSnippet: message.slice(0, 160),
-                },
-                timestamp: Date.now(),
-              }),
-            }).catch(() => {});
-            // #endregion
             errors.push({
               fileName: blob.name,
               stage: "transcription",
@@ -582,12 +547,14 @@ async function transcribePreparedFile(
       const orderedPages = chunkResults
         .flatMap((chunk) => chunk.pages)
         .sort((a, b) => a.pageNumber - b.pageNumber);
-      const subDocumentPlans = await analyzeChunkedDocumentStructureStep({
-        fileName: blob.name,
-        promptTask,
-        pages: orderedPages,
-        totalPages: pageCount,
-      });
+      const subDocumentPlans = shouldUseGatewayForMetadata()
+        ? await analyzeChunkedDocumentStructureStep({
+            fileName: blob.name,
+            promptTask,
+            pages: orderedPages,
+            totalPages: pageCount,
+          })
+        : [];
 
       const merged = mergePageChunkResults(
         chunkResults,
@@ -617,6 +584,7 @@ async function transcribePreparedFile(
 
     const result = await transcribeWholeFileStep({
       blob,
+      documentId,
       promptTask,
     });
     assertEverySubDocumentHasTranscription(blob.name, result.subDocuments);
@@ -646,6 +614,7 @@ async function transcribePreparedFile(
 
 async function transcribeWholeFileStep(input: {
   blob: BlobRef;
+  documentId: string;
   promptTask: "diplomatic-transcription" | "project-notebook";
 }): Promise<Omit<TranscribeFileStepResult, "transcribeMs">> {
   "use step";
@@ -655,6 +624,7 @@ async function transcribeWholeFileStep(input: {
     bytes,
     mediaType: input.blob.contentType,
     promptTask: input.promptTask,
+    documentId: input.documentId,
   });
   return {
     subDocuments: transcribed.subDocuments,
@@ -667,6 +637,7 @@ async function transcribeWholeFileStep(input: {
 
 async function transcribePageChunkStep(input: {
   fileName: string;
+  documentId: string;
   promptTask: "diplomatic-transcription" | "project-notebook";
   pages: PageImageRef[];
 }): Promise<TranscribePageChunkResult> {
@@ -681,35 +652,11 @@ async function transcribePageChunkStep(input: {
   try {
     return await transcribePageChunkResilient({
       pages: input.pages,
+      documentId: input.documentId,
       promptTask: input.promptTask,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    // #region agent log
-    const debugChunkErr = {
-      sessionId: "7a3fdc",
-      hypothesisId: "H1",
-      location: "batch-ingest.ts:transcribePageChunkStep-catch",
-      message: "chunk step error classification",
-      data: {
-        fileName: input.fileName,
-        pageCount: input.pages.length,
-        rateLimited: isRateLimitError(error),
-        transient: isTransientError(error),
-        errorSnippet: message.slice(0, 160),
-      },
-      timestamp: Date.now(),
-    };
-    console.info("[batch-ingest] debug:chunk-step-error", debugChunkErr.data);
-    fetch("http://127.0.0.1:7887/ingest/318da917-cfb1-40e4-ab12-d2bd647284d9", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Debug-Session-Id": "7a3fdc",
-      },
-      body: JSON.stringify(debugChunkErr),
-    }).catch(() => {});
-    // #endregion
     if (isTransientError(error)) {
       throw new RetryableError(
         `Page chunk transcription failed for ${input.fileName}: ${message}`,
