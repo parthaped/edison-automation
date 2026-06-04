@@ -1,5 +1,9 @@
-import { describe, expect, it, vi } from "vitest";
-import { mapLocalOcrResponse, transcribeWithLocalOcr } from "./local-ocr";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  mapLocalOcrResponse,
+  transcribePageImageWithLocalOcr,
+  transcribeWithLocalOcr,
+} from "./local-ocr";
 
 describe("mapLocalOcrResponse", () => {
   it("maps direct local OCR text to transcription result", () => {
@@ -39,6 +43,10 @@ describe("mapLocalOcrResponse", () => {
 });
 
 describe("transcribeWithLocalOcr", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   it("posts a document to the local OCR endpoint", async () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
@@ -64,6 +72,66 @@ describe("transcribeWithLocalOcr", () => {
       expect.objectContaining({ method: "POST" }),
     );
 
+    fetchMock.mockRestore();
+  });
+
+  it("sends the shared secret header when configured", async () => {
+    vi.stubEnv("EDISON_LOCAL_OCR_SECRET", "test-secret");
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(
+        new Response(
+          JSON.stringify({ ocrText: "ok", model: "local/test" }),
+          { status: 200 },
+        ),
+      );
+
+    await transcribeWithLocalOcr(
+      { bytes: new Uint8Array([1]), mediaType: "image/jpeg" },
+      "http://127.0.0.1:8787/transcribe",
+    );
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:8787/transcribe",
+      expect.objectContaining({
+        headers: { "X-Edison-Ocr-Secret": "test-secret" },
+      }),
+    );
+
+    vi.unstubAllEnvs();
+    fetchMock.mockRestore();
+  });
+});
+
+describe("transcribePageImageWithLocalOcr", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("returns page text from the local endpoint", async () => {
+    vi.stubEnv("EDISON_LOCAL_OCR_URL", "http://127.0.0.1:8787/transcribe");
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          ocrText: "Page one",
+          model: "local/kraken-en_best-v1",
+          promptVersion: "local-kraken-v1",
+        }),
+        { status: 200 },
+      ),
+    );
+
+    const result = await transcribePageImageWithLocalOcr({
+      bytes: new Uint8Array([1, 2, 3]),
+    });
+
+    expect(result).toEqual({
+      text: "Page one",
+      model: "local/kraken-en_best-v1",
+      promptVersion: "local-kraken-v1",
+    });
+
+    vi.unstubAllEnvs();
     fetchMock.mockRestore();
   });
 });

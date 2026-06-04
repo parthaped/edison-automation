@@ -11,6 +11,8 @@ import {
 } from "./ai-request";
 import type { TranscriptionPromptTask } from "./prompts";
 import { getActivePrompt } from "./prompts";
+import { isLocalOcrEnabled } from "./local-ocr-config";
+import { transcribePageImageWithLocalOcr } from "./local-ocr";
 import {
   getDefaultOcrModel,
   type SubDocumentResult,
@@ -157,6 +159,46 @@ function toError(value: unknown): Error {
 export async function transcribePageChunk(
   input: TranscribePageChunkInput,
 ): Promise<TranscribePageChunkResult> {
+  if (isLocalOcrEnabled()) {
+    const { signal, cleanup } = combineSignals(
+      input.signal,
+      getRequestTimeoutMs(),
+    );
+    try {
+      const pageResults = await Promise.all(
+        input.pages.map(async (page) => {
+          const bytes = await fetchImageBytes(page.url);
+          const result = await transcribePageImageWithLocalOcr({
+            bytes,
+            mediaType: "image/jpeg",
+            signal,
+          });
+          return {
+            pageNumber: page.pageNumber,
+            text: result.text,
+            model: result.model,
+            promptVersion: result.promptVersion,
+          };
+        }),
+      );
+      const model = pageResults[0]?.model ?? "local/kraken";
+      const promptVersion =
+        pageResults[0]?.promptVersion ?? "local-kraken-v1";
+      return {
+        pages: pageResults
+          .map((entry) => ({
+            pageNumber: entry.pageNumber,
+            text: entry.text.trim(),
+          }))
+          .sort((a, b) => a.pageNumber - b.pageNumber),
+        model,
+        promptVersion,
+      };
+    } finally {
+      cleanup();
+    }
+  }
+
   const model = input.model ?? getDefaultOcrModel();
   const activePrompt = getActivePrompt(
     input.promptTask ?? "diplomatic-transcription",

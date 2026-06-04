@@ -92,7 +92,9 @@ export async function batchIngestWorkflow(
 ): Promise<ManualIngestResult> {
   "use workflow";
 
-  const aiEnabled = Boolean(process.env.AI_GATEWAY_API_KEY);
+  const aiEnabled =
+    Boolean(process.env.AI_GATEWAY_API_KEY?.trim()) ||
+    Boolean(process.env.EDISON_LOCAL_OCR_URL?.trim());
   const maxConcurrency = effectiveFileConcurrency(
     input.blobs,
     BASE_MAX_CONCURRENCY,

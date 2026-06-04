@@ -1,0 +1,14 @@
+# Kraken CUDA local OCR service (install on the T1200 laptop ML venv).
+#
+# 1. Install CUDA PyTorch FIRST (CPU-only wheels will not use the GPU):
+#    pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
+# 2. Then install this file:
+#    pip install -r requirements-kraken-cuda.txt
+#
+# Verify: python ml/scripts/verify_cuda.py
+
+kraken>=7
+fastapi>=0.115
+uvicorn[standard]>=0.32
+python-multipart>=0.0.9
+pillow>=10.0

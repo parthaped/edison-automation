@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { getLocalOcrSecret, getLocalOcrUrl } from "./local-ocr-config";
 import type { TranscribeDocumentInput, TranscribeDocumentResult } from "./transcribe";
 
 const localOcrLineSchema = z.object({
@@ -75,31 +76,78 @@ export function mapLocalOcrResponse(
   };
 }
 
-export async function transcribeWithLocalOcr(
-  input: TranscribeDocumentInput,
+function localOcrHeaders(env: NodeJS.ProcessEnv = process.env): HeadersInit {
+  const secret = getLocalOcrSecret(env);
+  if (!secret) {
+    return {};
+  }
+  return { "X-Edison-Ocr-Secret": secret };
+}
+
+async function postLocalOcr(
   endpoint: string,
+  bytes: Uint8Array,
+  mediaType: string,
   signal?: AbortSignal,
-): Promise<TranscribeDocumentResult> {
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<LocalOcrResponse> {
   const formData = new FormData();
-  const fileBytes = new ArrayBuffer(input.bytes.byteLength);
-  new Uint8Array(fileBytes).set(input.bytes);
+  const fileBytes = new ArrayBuffer(bytes.byteLength);
+  new Uint8Array(fileBytes).set(bytes);
   formData.append(
     "file",
-    new Blob([fileBytes], { type: input.mediaType }),
+    new Blob([fileBytes], { type: mediaType }),
     "document",
   );
-  formData.append("mediaType", input.mediaType);
-  if (input.promptTask) {
-    formData.append("promptTask", input.promptTask);
-  }
+  formData.append("mediaType", mediaType);
 
   const response = await fetch(endpoint, {
     method: "POST",
+    headers: localOcrHeaders(env),
     body: formData,
     signal,
   });
   if (!response.ok) {
     throw new Error(`Local OCR request failed with ${response.status}.`);
   }
-  return mapLocalOcrResponse(await response.json());
+  return localOcrResponseSchema.parse(await response.json());
+}
+
+/** Transcribe one page image via the local Kraken / OCR HTTP service. */
+export async function transcribePageImageWithLocalOcr(input: {
+  bytes: Uint8Array;
+  mediaType?: string;
+  endpoint?: string;
+  signal?: AbortSignal;
+}): Promise<{ text: string; model: string; promptVersion: string }> {
+  const endpoint = input.endpoint ?? getLocalOcrUrl();
+  if (!endpoint) {
+    throw new Error("EDISON_LOCAL_OCR_URL is not configured.");
+  }
+  const parsed = await postLocalOcr(
+    endpoint,
+    input.bytes,
+    input.mediaType ?? "image/jpeg",
+    input.signal,
+  );
+  const text = flattenPages(parsed);
+  return {
+    text,
+    model: parsed.model,
+    promptVersion: parsed.promptVersion ?? "local-kraken-v1",
+  };
+}
+
+export async function transcribeWithLocalOcr(
+  input: TranscribeDocumentInput,
+  endpoint: string,
+  signal?: AbortSignal,
+): Promise<TranscribeDocumentResult> {
+  const parsed = await postLocalOcr(
+    endpoint,
+    input.bytes,
+    input.mediaType,
+    signal,
+  );
+  return mapLocalOcrResponse(parsed);
 }
