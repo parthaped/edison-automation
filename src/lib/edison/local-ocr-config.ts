@@ -18,11 +18,22 @@ export function isLocalOcrEnabled(
   return Boolean(getLocalOcrUrl(env));
 }
 
+export function isGatewayEnabled(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return Boolean(env.AI_GATEWAY_API_KEY?.trim());
+}
+
 /** Ingest transcription runs when AI Gateway or local Kraken OCR is configured. */
 export function isTranscriptionEnabled(
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
-  return (
-    Boolean(env.AI_GATEWAY_API_KEY?.trim()) || isLocalOcrEnabled(env)
-  );
+  return isGatewayEnabled(env) || isLocalOcrEnabled(env);
+}
+
+/** Catalog metadata / document splitting via gateway (text-only when Kraken was used). */
+export function shouldUseGatewayForMetadata(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return isGatewayEnabled(env);
 }

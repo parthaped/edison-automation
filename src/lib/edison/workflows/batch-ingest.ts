@@ -16,7 +16,7 @@ import { isTransientError } from "../ai-request";
 import {
   isTranscriptionEnabled,
   shouldUseGatewayForMetadata,
-} from "../ocr-provider";
+} from "../local-ocr-config";
 import {
   effectiveFileConcurrency,
   getPageChunkBatchDelayMs,
@@ -624,7 +624,6 @@ async function transcribeWholeFileStep(input: {
     bytes,
     mediaType: input.blob.contentType,
     promptTask: input.promptTask,
-    documentId: input.documentId,
   });
   return {
     subDocuments: transcribed.subDocuments,

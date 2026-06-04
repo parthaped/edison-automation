@@ -4,6 +4,7 @@ import {
   getLocalOcrUrl,
   isLocalOcrEnabled,
   isTranscriptionEnabled,
+  shouldUseGatewayForMetadata,
 } from "./local-ocr-config";
 
 describe("local-ocr-config", () => {
@@ -33,5 +34,13 @@ describe("local-ocr-config", () => {
   it("reads OCR secret", () => {
     vi.stubEnv("EDISON_LOCAL_OCR_SECRET", " shared-secret ");
     expect(getLocalOcrSecret()).toBe("shared-secret");
+  });
+
+  it("uses gateway for metadata only when AI Gateway is configured", () => {
+    vi.stubEnv("AI_GATEWAY_API_KEY", "");
+    expect(shouldUseGatewayForMetadata()).toBe(false);
+
+    vi.stubEnv("AI_GATEWAY_API_KEY", "test-key");
+    expect(shouldUseGatewayForMetadata()).toBe(true);
   });
 });

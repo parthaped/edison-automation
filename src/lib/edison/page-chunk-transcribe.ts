@@ -10,13 +10,10 @@ import {
   retryBackoffMs,
   sleepMs,
 } from "./ai-request";
-import { reformatPageChunkWithGateway } from "./kraken-reformat";
-import { transcribePagesWithLocalOcr } from "./local-ocr";
-import { isLocalOcrEnabled } from "./ocr-provider";
-import type { TranscriptionPromptTask } from "./prompts";
-import { getActivePrompt } from "./prompts";
 import { isLocalOcrEnabled } from "./local-ocr-config";
 import { transcribePageImageWithLocalOcr } from "./local-ocr";
+import type { TranscriptionPromptTask } from "./prompts";
+import { getActivePrompt } from "./prompts";
 import {
   getDefaultOcrModel,
   type SubDocumentResult,
