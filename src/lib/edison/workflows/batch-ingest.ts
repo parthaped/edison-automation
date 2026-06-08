@@ -6,17 +6,17 @@ import {
   fetch,
   sleep,
 } from "workflow";
+import { isTranscriptionEnabled } from "../local-ocr-config";
+import { isOcrQueueEnabled } from "../ocr-queue-config";
+import { createAndWaitForOcrQueueJob } from "../ocr-queue-transcribe";
 import { createExtractionPlan, type ExtractionPlan } from "../extraction";
 import {
   assignDocumentId,
   defaultFolderIdFromFileName,
   normalizeFolderId,
 } from "../id-policy";
+import { isGeminiConfigured } from "../gemini-config";
 import { isTransientError } from "../ai-request";
-import {
-  isTranscriptionEnabled,
-  shouldUseGatewayForMetadata,
-} from "../local-ocr-config";
 import {
   effectiveFileConcurrency,
   getPageChunkBatchDelayMs,
@@ -476,10 +476,42 @@ async function transcribePreparedFile(
         urlByPage.set(entry.pageIndex + 1, entry.url);
       }
 
-      const chunkConcurrency = getPageChunkConcurrency();
-      const batchDelayMs = getPageChunkBatchDelayMs();
       const chunkResults: TranscribePageChunkResult[] = [];
       const failedRanges: string[] = [];
+
+      if (isOcrQueueEnabled()) {
+        try {
+          const queueResult = await transcribeViaOcrQueueStep({
+            fileName: blob.name,
+            pages: Array.from({ length: pageCount }, (_, index) => {
+              const pageNumber = index + 1;
+              const url = urlByPage.get(pageNumber);
+              if (!url) {
+                throw new RetryableError(
+                  `Missing rasterized page URL for page ${pageNumber} in ${blob.name}.`,
+                );
+              }
+              return { pageNumber, imageUrl: url };
+            }),
+          });
+          chunkResults.push(queueResult);
+        } catch (error) {
+          const message =
+            error instanceof Error ? error.message : String(error);
+          failedRanges.push(`1-${pageCount}`);
+          errors.push({ fileName: blob.name, stage: "transcription", message });
+          if (error instanceof RetryableError) {
+            throw error;
+          }
+          if (isTransientError(error)) {
+            throw new RetryableError(
+              `OCR queue transcription failed for ${blob.name}: ${message}`,
+            );
+          }
+        }
+      } else {
+      const chunkConcurrency = getPageChunkConcurrency();
+      const batchDelayMs = getPageChunkBatchDelayMs();
       for (
         let offset = 0;
         offset < ranges.length;
@@ -517,6 +549,7 @@ async function transcribePreparedFile(
           }
         }
       }
+      }
 
       if (failedRanges.length > 0) {
         throw new RetryableError(
@@ -547,7 +580,7 @@ async function transcribePreparedFile(
       const orderedPages = chunkResults
         .flatMap((chunk) => chunk.pages)
         .sort((a, b) => a.pageNumber - b.pageNumber);
-      const subDocumentPlans = shouldUseGatewayForMetadata()
+      const subDocumentPlans = isGeminiConfigured()
         ? await analyzeChunkedDocumentStructureStep({
             fileName: blob.name,
             promptTask,
@@ -632,6 +665,28 @@ async function transcribeWholeFileStep(input: {
     outputTokens: transcribed.outputTokens,
     errors: [],
   };
+}
+
+async function transcribeViaOcrQueueStep(input: {
+  fileName: string;
+  pages: Array<{ pageNumber: number; imageUrl: string }>;
+}): Promise<TranscribePageChunkResult> {
+  "use step";
+
+  try {
+    return await createAndWaitForOcrQueueJob({
+      fileName: input.fileName,
+      pages: input.pages,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (isTransientError(error)) {
+      throw new RetryableError(
+        `OCR queue transcription failed for ${input.fileName}: ${message}`,
+      );
+    }
+    throw error;
+  }
 }
 
 async function transcribePageChunkStep(input: {
@@ -785,7 +840,7 @@ async function persistSubDocumentsStep(
       documentId: sibling.documentPackage.documentId,
       folderId: sibling.documentPackage.folderId,
       title: sibling.documentPackage.title,
-      detail: `${input.model ?? "gateway-configured-model"} · prompt v${sibling.transcription.promptVersion}`,
+      detail: `${input.model ?? "gemini-configured-model"} · prompt v${sibling.transcription.promptVersion}`,
       metadata: {
         model: input.model,
         promptVersion: sibling.transcription.promptVersion,

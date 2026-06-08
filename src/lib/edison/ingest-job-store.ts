@@ -247,17 +247,6 @@ export function applyBatchEvent(
   }
 }
 
-export function foldBatchEvents(
-  batchId: string,
-  events: Iterable<BatchEvent>,
-): IngestJobSnapshot {
-  let snapshot = emptySnapshot(batchId);
-  for (const event of events) {
-    snapshot = applyBatchEvent(snapshot, event);
-  }
-  return snapshot;
-}
-
 function upsertFile(
   perFile: FileSnapshot[],
   fileName: string,

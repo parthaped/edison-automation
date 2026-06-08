@@ -1,4 +1,10 @@
-# Kraken local OCR (laptop + Cloudflare Tunnel)
+# Kraken local OCR (deprecated)
+
+**Ingest no longer uses Kraken.** Use [amarel-qwen-ocr.md](./amarel-qwen-ocr.md) with `serve_qwen_ocr.py` and `EDISON_REMOTE_OCR_URL`.
+
+---
+
+# Kraken local OCR (legacy — laptop + Cloudflare Tunnel)
 
 ## Quick start (T1200, Windows)
 
@@ -44,7 +50,7 @@ Run: `cloudflared tunnel run <tunnel-name>` (keep running during ingest).
 |----------|---------|
 | `EDISON_LOCAL_OCR_URL` | `https://ocr.example.com/transcribe` |
 | `EDISON_LOCAL_OCR_SECRET` | Must match `EDISON_KRAKEN_OCR_SECRET` on laptop |
-| `AI_GATEWAY_API_KEY` | Required for post-transcribe document splitting (text-only) |
+| `EDISON_GEMINI_API_KEY` | Required for post-transcribe document splitting (text-only) |
 | `EDISON_PAGE_CHUNK_BATCH_DELAY_MS` | `0` when using local OCR |
 | `EDISON_PAGE_CHUNK_CONCURRENCY` | `2`–`4` (server serializes GPU) |
 | `EDISON_AI_TIMEOUT_MS` | `120000` or higher for slow pages |

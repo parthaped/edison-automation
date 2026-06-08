@@ -4,7 +4,7 @@ import {
   getLocalOcrUrl,
   isLocalOcrEnabled,
   isTranscriptionEnabled,
-  shouldUseGatewayForMetadata,
+  shouldUseGeminiForMetadata,
 } from "./local-ocr-config";
 
 describe("local-ocr-config", () => {
@@ -18,8 +18,14 @@ describe("local-ocr-config", () => {
     expect(getLocalOcrUrl()).toBe("https://ocr.example.com/transcribe");
   });
 
-  it("enables transcription with gateway or local OCR", () => {
-    vi.stubEnv("AI_GATEWAY_API_KEY", "");
+  it("prefers EDISON_REMOTE_OCR_URL over EDISON_LOCAL_OCR_URL", () => {
+    vi.stubEnv("EDISON_REMOTE_OCR_URL", "https://amarel.example.com/transcribe");
+    vi.stubEnv("EDISON_LOCAL_OCR_URL", "https://legacy.example.com/transcribe");
+    expect(getLocalOcrUrl()).toBe("https://amarel.example.com/transcribe");
+  });
+
+  it("enables transcription with gateway, OCR queue, or local OCR", () => {
+    vi.stubEnv("EDISON_GEMINI_API_KEY", "");
     vi.stubEnv("EDISON_LOCAL_OCR_URL", "");
     expect(isTranscriptionEnabled()).toBe(false);
 
@@ -27,7 +33,11 @@ describe("local-ocr-config", () => {
     expect(isTranscriptionEnabled()).toBe(true);
 
     vi.stubEnv("EDISON_LOCAL_OCR_URL", "");
-    vi.stubEnv("AI_GATEWAY_API_KEY", "test-key");
+    vi.stubEnv("EDISON_OCR_QUEUE_ENABLED", "true");
+    expect(isTranscriptionEnabled()).toBe(true);
+
+    vi.stubEnv("EDISON_OCR_QUEUE_ENABLED", "");
+    vi.stubEnv("EDISON_GEMINI_API_KEY", "AIza_test");
     expect(isTranscriptionEnabled()).toBe(true);
   });
 
@@ -36,11 +46,11 @@ describe("local-ocr-config", () => {
     expect(getLocalOcrSecret()).toBe("shared-secret");
   });
 
-  it("uses gateway for metadata only when AI Gateway is configured", () => {
-    vi.stubEnv("AI_GATEWAY_API_KEY", "");
-    expect(shouldUseGatewayForMetadata()).toBe(false);
+  it("uses Gemini for metadata only when Gemini is configured", () => {
+    vi.stubEnv("EDISON_GEMINI_API_KEY", "");
+    expect(shouldUseGeminiForMetadata()).toBe(false);
 
-    vi.stubEnv("AI_GATEWAY_API_KEY", "test-key");
-    expect(shouldUseGatewayForMetadata()).toBe(true);
+    vi.stubEnv("EDISON_GEMINI_API_KEY", "AIza_test");
+    expect(shouldUseGeminiForMetadata()).toBe(true);
   });
 });

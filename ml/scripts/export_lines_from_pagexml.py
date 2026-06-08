@@ -22,6 +22,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--lines-root", type=Path, default=Path("ml/data/lines"))
     parser.add_argument("--output", type=Path, default=Path("ml/data/manifests/line_crops.jsonl"))
     parser.add_argument("--split", default="train", choices=["train", "validation", "test"])
+    parser.add_argument(
+        "--manifest",
+        type=Path,
+        default=None,
+        help="Optional kraken_gt_manifest.jsonl; uses per-page split from manifest.",
+    )
+    parser.add_argument(
+        "--page-list",
+        type=Path,
+        default=None,
+        help="Optional newline-separated PAGE XML paths to export (default: all in pagexml-dir).",
+    )
     parser.add_argument("--crop", action="store_true", help="Crop line images with Pillow.")
     parser.add_argument("--padding", type=int, default=6, help="Crop padding in pixels.")
     return parser.parse_args()
@@ -94,11 +106,28 @@ def region_type(region: ET.Element) -> str:
     return region.attrib.get("type", "body")
 
 
-def iter_line_rows(xml_path: Path, args: argparse.Namespace) -> list[dict[str, Any]]:
+def load_split_map(manifest_path: Path) -> dict[str, str]:
+    mapping: dict[str, str] = {}
+    with manifest_path.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            if not line.strip():
+                continue
+            row = json.loads(line)
+            page_id = str(row.get("id") or Path(str(row.get("pagexml_path", ""))).stem)
+            mapping[page_id] = str(row.get("split", "train"))
+    return mapping
+
+
+def iter_line_rows(
+    xml_path: Path,
+    args: argparse.Namespace,
+    split_map: dict[str, str] | None = None,
+) -> list[dict[str, Any]]:
     root = ET.parse(xml_path).getroot()
     page = page_element(root)
     image_path = image_path_for(page, xml_path, args.images_root)
     document_id = xml_path.stem
+    page_split = (split_map or {}).get(document_id, args.split)
     rows: list[dict[str, Any]] = []
     page_index = 0
     line_index = 0
@@ -127,7 +156,7 @@ def iter_line_rows(xml_path: Path, args: argparse.Namespace) -> list[dict[str, A
                     "text": text,
                     "region_type": current_region_type,
                     "writer_group": "unknown",
-                    "split": args.split,
+                    "split": page_split,
                     "quality_flags": [],
                 }
             )
@@ -158,9 +187,14 @@ def crop_rows(rows: list[dict[str, Any]]) -> None:
 
 def main() -> int:
     args = parse_args()
+    split_map = load_split_map(args.manifest) if args.manifest else None
+    if args.page_list:
+        xml_paths = [Path(line.strip()) for line in args.page_list.read_text(encoding="utf-8").splitlines() if line.strip()]
+    else:
+        xml_paths = sorted(args.pagexml_dir.glob("*.xml"))
     rows: list[dict[str, Any]] = []
-    for xml_path in sorted(args.pagexml_dir.glob("*.xml")):
-        rows.extend(iter_line_rows(xml_path, args))
+    for xml_path in xml_paths:
+        rows.extend(iter_line_rows(xml_path, args, split_map))
     if args.crop:
         crop_rows(rows)
     args.output.parent.mkdir(parents=True, exist_ok=True)

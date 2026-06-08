@@ -1,5 +1,3 @@
-import type { ExtractionPlan } from "./extraction";
-
 /** Pages per vision LLM call when using page-chunked transcription. */
 export const DEFAULT_PAGE_CHUNK_SIZE = 8;
 
@@ -9,14 +7,11 @@ export const LARGE_FILE_BYTES = 50 * 1024 * 1024;
 /** PDFs with at least this many pages use page-chunked transcription. */
 export const LARGE_PAGE_COUNT = 15;
 
-/** Default parallel page-chunk transcribe steps within one file (1 avoids AI Gateway free-tier bursts). */
+/** Default parallel page-chunk transcribe steps within one file (1 avoids Gemini rate-limit bursts). */
 export const DEFAULT_PAGE_CHUNK_CONCURRENCY = 1;
 
 /** Pause between chunk step batches to reduce rate-limit errors (ms). */
 export const DEFAULT_PAGE_CHUNK_BATCH_DELAY_MS = 3000;
-
-/** @deprecated Use getPageChunkConcurrency() */
-export const PAGE_CHUNK_CONCURRENCY = DEFAULT_PAGE_CHUNK_CONCURRENCY;
 
 export interface PageRange {
   startPage: number;
@@ -82,18 +77,4 @@ export function effectiveFileConcurrency(
   const hasVeryLarge = blobs.some((blob) => blob.size >= LARGE_FILE_BYTES);
   if (hasVeryLarge) return 1;
   return baseConcurrency;
-}
-
-export function summarizeExtractionPlan(plan: ExtractionPlan): {
-  pageCount: number;
-  kind: ExtractionPlan["kind"];
-  blockedReason?: string;
-  warnings: string[];
-} {
-  return {
-    pageCount: plan.pageCount,
-    kind: plan.kind,
-    blockedReason: plan.blockedReason,
-    warnings: plan.warnings,
-  };
 }

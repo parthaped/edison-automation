@@ -1,4 +1,7 @@
 import { z } from "zod";
+import { isGeminiConfigured } from "./gemini-config";
+import { isOcrQueueEnabled } from "./ocr-queue-config";
+import { getLocalOcrUrl, isLocalOcrEnabled } from "./local-ocr-config";
 
 const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
@@ -9,7 +12,11 @@ const envSchema = z.object({
   BOX_CLIENT_SECRET: z.string().optional(),
   BOX_ENTERPRISE_ID: z.string().optional(),
   BOX_WEBHOOK_SECRET: z.string().optional(),
-  AI_GATEWAY_API_KEY: z.string().optional(),
+  EDISON_GEMINI_API_KEY: z.string().optional(),
+  GOOGLE_GENERATIVE_AI_API_KEY: z.string().optional(),
+  EDISON_GCP_PROJECT_ID: z.string().optional(),
+  EDISON_GCP_LOCATION: z.string().optional(),
+  EDISON_OCR_MODEL: z.string().optional(),
 });
 
 export type AppEnv = z.infer<typeof envSchema>;
@@ -22,21 +29,27 @@ export function getRuntimeCapabilities(
   env = getAppEnv(),
   source: NodeJS.ProcessEnv = process.env,
 ) {
-  const localOcr = Boolean(source.EDISON_LOCAL_OCR_URL?.trim());
-  const gateway = Boolean(env.AI_GATEWAY_API_KEY?.trim());
+  const localOcr = isLocalOcrEnabled(source);
+  const ocrQueue = isOcrQueueEnabled(source);
+  const gemini = isGeminiConfigured(source);
+  const remoteOcrUrl = getLocalOcrUrl(source);
   return {
     storage: env.DATABASE_URL ? "database-configured" : "development-memory-store",
     files: env.BLOB_READ_WRITE_TOKEN ? "object-storage-configured" : "local-or-deferred-storage",
     box: env.BOX_CLIENT_ID && env.BOX_CLIENT_SECRET ? "configured" : "not-configured",
     ai:
-      gateway || localOcr
-        ? localOcr && !gateway
-          ? "local-ocr-configured"
-          : localOcr && gateway
-            ? "local-ocr-and-gateway-configured"
-            : "configured"
+      gemini || localOcr || ocrQueue
+        ? ocrQueue && !gemini
+          ? "ocr-queue-configured"
+          : localOcr && !gemini
+            ? "local-ocr-configured"
+            : localOcr && gemini
+              ? "local-ocr-and-gemini-configured"
+              : "configured"
         : "not-configured",
     localOcr: localOcr ? "configured" : "not-configured",
+    ocrQueue: ocrQueue ? "configured" : "not-configured",
+    remoteOcrUrl: remoteOcrUrl ?? null,
     omeka: env.OMEKA_API_BASE_URL ? "public-api-configured" : "not-configured",
   };
 }

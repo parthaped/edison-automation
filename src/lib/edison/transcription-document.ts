@@ -285,10 +285,6 @@ export function serializeTranscriptionDocument(
   return parts.join("\n\n").trimEnd();
 }
 
-export function extractUncertainReadings(text: string): string[] {
-  return [...new Set(text.match(/\[[^\]]+\?\]/g) ?? [])];
-}
-
 /** Find block index and optional cell coords containing a token. */
 export function locateUncertainToken(
   doc: TranscriptionDocument,

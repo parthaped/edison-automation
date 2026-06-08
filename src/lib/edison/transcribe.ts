@@ -1,13 +1,15 @@
 import { generateText, Output } from "ai";
 import { z } from "zod";
 import { combineSignals, getRequestTimeoutMs } from "./ai-request";
+import {
+  getDefaultOcrModelLabel,
+  resolveGeminiModel,
+} from "./gemini-model";
 import { getLocalOcrUrl } from "./local-ocr-config";
 import { transcribeWithLocalOcr } from "./local-ocr";
 import { getActivePrompt, type TranscriptionPromptTask } from "./prompts";
 
-// Multimodal OCR / HTR and metadata extraction via the Vercel AI Gateway.
-// A plain "provider/model" string auto-routes through the gateway when
-// AI_GATEWAY_API_KEY is set in the environment. No provider package is needed.
+// Multimodal OCR / HTR and metadata extraction via the Google Gemini API.
 
 const SUPPORTED_IMAGE_MIME_TYPES = new Set([
   "image/jpeg",
@@ -19,26 +21,10 @@ const SUPPORTED_IMAGE_MIME_TYPES = new Set([
 ]);
 
 const SUPPORTED_PDF_MIME_TYPE = "application/pdf";
-// Vision-capable AI Gateway model slug. Overridable through the
-// EDISON_OCR_MODEL environment variable. A single call now produces both the
-// transcription and the structured metadata.
-const DEFAULT_OCR_MODEL = "google/gemini-2.5-flash";
-export type TranscribableMediaType =
-  | "image/jpeg"
-  | "image/jpg"
-  | "image/png"
-  | "image/webp"
-  | "image/gif"
-  | "image/tiff"
-  | "application/pdf";
 
 export function isTranscribableMediaType(mimeType: string): boolean {
   const lower = mimeType.toLowerCase();
   return SUPPORTED_IMAGE_MIME_TYPES.has(lower) || lower === SUPPORTED_PDF_MIME_TYPE;
-}
-
-export function getDefaultOcrModel(env: NodeJS.ProcessEnv = process.env): string {
-  return env.EDISON_OCR_MODEL ?? DEFAULT_OCR_MODEL;
 }
 
 export interface TranscribeDocumentInput {
@@ -193,7 +179,7 @@ export async function transcribeDocument(
     );
   }
 
-  const model = input.model ?? getDefaultOcrModel();
+  const modelLabel = input.model ?? getDefaultOcrModelLabel();
   const activePrompt = getActivePrompt(input.promptTask ?? "diplomatic-transcription");
 
   const localOcrUrl = getLocalOcrUrl();
@@ -222,7 +208,7 @@ export async function transcribeDocument(
   const { signal, cleanup } = combineSignals(input.signal, getRequestTimeoutMs());
   try {
     const result = await generateText({
-      model,
+      model: resolveGeminiModel(modelLabel),
       abortSignal: signal,
       output: Output.object({ schema: combinedSchema }),
       messages: [
@@ -274,7 +260,7 @@ export async function transcribeDocument(
     return {
       ocrText: aggregatedText,
       uncertainReadings: aggregatedUncertain,
-      model,
+      model: modelLabel,
       promptVersion: activePrompt.version,
       inputTokens: result.usage?.inputTokens,
       outputTokens: result.usage?.outputTokens,

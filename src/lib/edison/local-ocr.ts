@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { extractUncertainReadings } from "./confidence";
 import { getLocalOcrSecret, getLocalOcrUrl } from "./local-ocr-config";
 import type { TranscribeDocumentInput, TranscribeDocumentResult } from "./transcribe";
 
@@ -25,10 +26,6 @@ const localOcrResponseSchema = z.object({
 
 export type LocalOcrResponse = z.infer<typeof localOcrResponseSchema>;
 
-function extractUncertainReadings(text: string): string[] {
-  return [...new Set(text.match(/\[[^\]]+\?\]/g) ?? [])];
-}
-
 function flattenPages(response: LocalOcrResponse): string {
   if (response.ocrText?.trim()) {
     return response.ocrText.trim();
@@ -54,7 +51,7 @@ export function mapLocalOcrResponse(
     ocrText,
     uncertainReadings,
     model: parsed.model,
-    promptVersion: parsed.promptVersion ?? "local-htr-v1",
+    promptVersion: parsed.promptVersion ?? "local-qwen-vl-v1",
     subDocuments: [
       {
         startPage: 1,
@@ -113,7 +110,7 @@ async function postLocalOcr(
   return localOcrResponseSchema.parse(await response.json());
 }
 
-/** Transcribe one page image via the local Kraken / OCR HTTP service. */
+/** Transcribe one page image via the remote Qwen / HTTP OCR service. */
 export async function transcribePageImageWithLocalOcr(input: {
   bytes: Uint8Array;
   mediaType?: string;
@@ -134,7 +131,7 @@ export async function transcribePageImageWithLocalOcr(input: {
   return {
     text,
     model: parsed.model,
-    promptVersion: parsed.promptVersion ?? "local-kraken-v1",
+    promptVersion: parsed.promptVersion ?? "local-qwen-vl-v1",
   };
 }
 

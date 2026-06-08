@@ -15,7 +15,7 @@ describe("transcribePageChunk with local OCR", () => {
     vi.restoreAllMocks();
   });
 
-  it("uses local Kraken per page instead of generateText", async () => {
+  it("uses local Qwen OCR per page instead of generateText", async () => {
     vi.stubEnv("EDISON_LOCAL_OCR_URL", "http://127.0.0.1:8787/transcribe");
     vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
       new Response(new Uint8Array([1]), { status: 200 }),
@@ -24,8 +24,8 @@ describe("transcribePageChunk with local OCR", () => {
       .spyOn(localOcr, "transcribePageImageWithLocalOcr")
       .mockImplementation(async (input) => ({
         text: `text-${input.bytes[0]}`,
-        model: "local/kraken-en_best-v1",
-        promptVersion: "local-kraken-v1",
+        model: "local/qwen2.5-vl-7b-instruct",
+        promptVersion: "local-qwen-vl-v1",
       }));
 
     const result = await pageChunk.transcribePageChunk({
@@ -37,7 +37,7 @@ describe("transcribePageChunk with local OCR", () => {
 
     expect(localSpy).toHaveBeenCalledTimes(2);
     expect(globalThis.fetch).toHaveBeenCalledTimes(2);
-    expect(result.model).toBe("local/kraken-en_best-v1");
+    expect(result.model).toBe("local/qwen2.5-vl-7b-instruct");
     expect(result.pages).toEqual([
       { pageNumber: 1, text: "text-1" },
       { pageNumber: 2, text: "text-1" },

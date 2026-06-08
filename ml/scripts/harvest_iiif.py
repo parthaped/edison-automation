@@ -62,6 +62,7 @@ DOCUMENT_FIELDS = [
     "transcript_path",
     "split",
     "notes",
+    "exclude_from_training",
 ]
 
 
@@ -348,6 +349,12 @@ def document_row(
         document_id,
         transcripts_dir,
     )
+    source_lower = transcript_source.lower()
+    exclude_from_training = "yes" if source_lower.startswith("iiif:abstract") or source_lower in {
+        "iiif:description",
+        "iiif:editor's notes",
+        "iiif:editors notes",
+    } else "no"
     return {
         "document_id": document_id,
         "folder_id": folder_id,
@@ -369,6 +376,7 @@ def document_row(
         "transcript_path": transcript_path,
         "split": classify_split(document_id),
         "notes": "",
+        "exclude_from_training": exclude_from_training,
     }
 
 

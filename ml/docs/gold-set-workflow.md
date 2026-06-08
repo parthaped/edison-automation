@@ -34,6 +34,30 @@ Use `ml/data/manifests/source_manifest.csv` to choose documents with available h
 - The PAGE XML image filename resolves to a local image.
 - Train/validation/test split is inherited by document, not line.
 
+## Automated alternative (Scripto-aligned)
+
+When eScriptorium review is not yet available, the repo can build Kraken-compatible
+PAGE XML from Rutgers Scripto transcriptions:
+
+```bash
+python ml/scripts/build_kraken_ground_truth.py --limit 500 --unprocessed-only --resume --device cuda:0
+```
+
+Select a diverse 50-page gold subset for the first training/eval cycle:
+
+```bash
+python ml/scripts/select_gold_set.py
+python ml/scripts/verify_gold_set.py
+```
+
+Outputs:
+
+- `ml/data/manifests/gold_set_manifest.jsonl`
+- `ml/data/manifests/gold_set_pagexml.txt`
+
+Replace Scripto-aligned pages with eScriptorium-reviewed exports over time; keep
+document-level splits intact.
+
 ## Outputs
 
 Place reviewed PAGE XML files in:
@@ -45,5 +69,8 @@ ml/data/pagexml/
 Then generate line-crop JSONL:
 
 ```bash
-python ml/scripts/export_lines_from_pagexml.py --pagexml-dir ml/data/pagexml --output ml/data/manifests/line_crops.jsonl --crop
+python ml/scripts/export_lines_from_pagexml.py \
+  --manifest ml/data/manifests/kraken_gt_manifest.jsonl \
+  --output ml/data/manifests/line_crops.jsonl \
+  --crop
 ```

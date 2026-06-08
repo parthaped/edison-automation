@@ -223,7 +223,7 @@ export async function processSourceFile(
   const transcription: TranscriptionRun = {
     id: `${documentPackage.documentId}-run-1`,
     documentId: documentPackage.documentId,
-    model: input.model ?? "gateway-configured-model",
+    model: input.model ?? "gemini-configured-model",
     promptVersion: diplomaticPrompt.version,
     ocrText: rawOcrText,
     diplomaticText: cleanedText,
@@ -502,12 +502,12 @@ export async function processSourceFileSubDocuments(
     const transcription: TranscriptionRun = {
       id: `${documentId}-run-1`,
       documentId,
-      model: input.model ?? "gateway-configured-model",
+      model: input.model ?? "gemini-configured-model",
       promptVersion: diplomaticPrompt.version,
       ocrText: sub.ocrText,
       diplomaticText: cleanedText,
       uncertainReadings,
-      // Token counts are emitted per-source by the AI Gateway. Attribute them
+      // Token counts are emitted per-source by the transcription backend. Attribute them
       // to the first sibling so totals add up correctly without double-counting.
       ...(position === 0 && input.inputTokens !== undefined
         ? { inputTokens: input.inputTokens }

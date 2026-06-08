@@ -98,7 +98,7 @@ export const sampleDocuments: DocumentPackage[] = [
 export const sampleTranscription: TranscriptionRun = {
   id: "E2002AAA-run-1",
   documentId: "E2002AAA",
-  model: "gateway-configured-model",
+  model: "gemini-configured-model",
   promptVersion: "3.0.0",
   ocrText:
     "## E2002_Page_01.jpg\n\nLetterhead:\nEdison Electric Light Co. of Philadelphia\n\nDateline:\nPhiladelphia, Jan. 12, 1890\n\nBody:\nMr. Marks reports on the [filament?] tests and station materials.\n\nSignature:\nW. D. Marks",

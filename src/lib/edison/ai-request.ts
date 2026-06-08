@@ -1,4 +1,4 @@
-// Shared timeout and transient-error helpers for AI Gateway calls.
+// Shared timeout and transient-error helpers for Gemini / OCR HTTP calls.
 
 export const DEFAULT_AI_TIMEOUT_MS = 45_000;
 
@@ -84,7 +84,7 @@ export function isTransientError(error: unknown): boolean {
   );
 }
 
-/** Longer backoff for gateway free-tier / quota rate limits. */
+/** Longer backoff for Gemini API quota rate limits. */
 export function rateLimitBackoffMs(attemptIndex: number): number {
   const steps = [5000, 15000, 30000];
   return steps[Math.min(attemptIndex, steps.length - 1)] ?? 30000;

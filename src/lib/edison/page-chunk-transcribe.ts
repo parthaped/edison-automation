@@ -12,10 +12,10 @@ import {
 } from "./ai-request";
 import { isLocalOcrEnabled } from "./local-ocr-config";
 import { transcribePageImageWithLocalOcr } from "./local-ocr";
+import { getDefaultOcrModelLabel, resolveGeminiModel } from "./gemini-model";
 import type { TranscriptionPromptTask } from "./prompts";
 import { getActivePrompt } from "./prompts";
 import {
-  getDefaultOcrModel,
   type SubDocumentResult,
   type TranscribedMetadata,
   type TranscribeDocumentResult,
@@ -38,18 +38,6 @@ const pageChunkSchema = z.object({
       }),
     )
     .min(1),
-});
-
-const metadataOnlySchema = z.object({
-  title: z.string(),
-  documentType: z.string(),
-  date: z.string(),
-  authors: z.array(z.string()),
-  recipients: z.array(z.string()),
-  mentionedNames: z.array(z.string()),
-  subjects: z.array(z.string()),
-  places: z.array(z.string()),
-  comments: z.string(),
 });
 
 const chunkedSubDocumentSchema = z.object({
@@ -117,7 +105,7 @@ const PAGE_CHUNK_INSTRUCTION =
 const CHUNKED_SPLIT_INSTRUCTION =
   "You are given OCR text for every page of a source PDF. Decide whether the source contains ONE document or MULTIPLE separate documents stitched together. Boundary signals include new letterhead, new dateline, new salutation/closing pair, explicit end markers, blank separator pages, or obvious changes in subject/format. Return contiguous, non-overlapping page ranges that cover every page. If uncertain, prefer fewer splits.";
 
-export async function fetchImageBytes(url: string): Promise<Uint8Array> {
+async function fetchImageBytes(url: string): Promise<Uint8Array> {
   const response = await fetch(url);
   if (!response.ok) {
     throw new Error(`Failed to fetch page image (${response.status}).`);
@@ -186,9 +174,9 @@ export async function transcribePageChunk(
           };
         }),
       );
-      const model = pageResults[0]?.model ?? "local/kraken";
+      const model = pageResults[0]?.model ?? "local/qwen2.5-vl-7b-instruct";
       const promptVersion =
-        pageResults[0]?.promptVersion ?? "local-kraken-v1";
+        pageResults[0]?.promptVersion ?? "local-qwen-vl-v1";
       return {
         pages: pageResults
           .map((entry) => ({
@@ -204,7 +192,7 @@ export async function transcribePageChunk(
     }
   }
 
-  const model = input.model ?? getDefaultOcrModel();
+  const modelLabel = input.model ?? getDefaultOcrModelLabel();
   const activePrompt = getActivePrompt(promptTask);
 
   const imageParts = await Promise.all(
@@ -224,7 +212,7 @@ export async function transcribePageChunk(
   );
   try {
     const result = await generateText({
-      model,
+      model: resolveGeminiModel(modelLabel),
       abortSignal: signal,
       output: Output.object({ schema: pageChunkSchema }),
       messages: [
@@ -249,7 +237,7 @@ export async function transcribePageChunk(
           pageNumber: entry.pageNumber,
           text: (entry.transcription ?? "").trim(),
         })),
-      model,
+      model: modelLabel,
       promptVersion: activePrompt.version,
       inputTokens: result.usage?.inputTokens,
       outputTokens: result.usage?.outputTokens,
@@ -332,53 +320,6 @@ export async function transcribePageChunkResilient(
   return mergeChunkResults(left, right);
 }
 
-export async function extractDocumentMetadataFromSample(input: {
-  samplePageUrl: string;
-  mergedTextExcerpt: string;
-  totalPages: number;
-  model?: string;
-  signal?: AbortSignal;
-}): Promise<TranscribedMetadata> {
-  const model = input.model ?? getDefaultOcrModel();
-  const bytes = await fetchImageBytes(input.samplePageUrl);
-  const excerpt = input.mergedTextExcerpt.slice(0, 8000);
-
-  const result = await generateText({
-    model,
-    abortSignal: input.signal,
-    output: Output.object({ schema: metadataOnlySchema }),
-    messages: [
-      {
-        role: "user",
-        content: [
-          {
-            type: "text",
-            text: `Index this ${input.totalPages}-page document for the TAEP Omeka-S catalog using the sample page and transcription excerpt. Extract document type, date, authors, recipients, names mentioned, places, subjects, and comments. Leave fields empty rather than guessing.\n\nTranscription excerpt:\n${excerpt}`,
-          },
-          {
-            type: "image",
-            image: bytes,
-            mediaType: "image/jpeg",
-          },
-        ],
-      },
-    ],
-  });
-
-  const output = result.output;
-  return {
-    title: output.title?.trim() || "",
-    documentType: output.documentType?.trim() || "",
-    date: output.date?.trim() || "",
-    authors: output.authors ?? [],
-    recipients: output.recipients ?? [],
-    mentionedNames: output.mentionedNames ?? [],
-    subjects: output.subjects ?? [],
-    places: output.places ?? [],
-    comments: output.comments?.trim() || undefined,
-  };
-}
-
 export async function analyzeChunkedDocumentStructure(input: {
   pages: Array<{ pageNumber: number; text: string }>;
   totalPages: number;
@@ -386,7 +327,7 @@ export async function analyzeChunkedDocumentStructure(input: {
   model?: string;
   signal?: AbortSignal;
 }): Promise<ChunkedSubDocumentPlan[]> {
-  const model = input.model ?? getDefaultOcrModel();
+  const modelLabel = input.model ?? getDefaultOcrModelLabel();
   const activePrompt = getActivePrompt(
     input.promptTask ?? "diplomatic-transcription",
   );
@@ -398,7 +339,7 @@ export async function analyzeChunkedDocumentStructure(input: {
     .join("\n\n");
 
   const result = await generateText({
-    model,
+    model: resolveGeminiModel(modelLabel),
     abortSignal: input.signal,
     output: Output.object({ schema: chunkedStructureSchema }),
     messages: [
@@ -483,7 +424,7 @@ export function mergePageChunkResults(
     };
   });
 
-  const model = chunkResults[0]?.model ?? getDefaultOcrModel();
+  const model = chunkResults[0]?.model ?? getDefaultOcrModelLabel();
   const promptVersion = chunkResults[0]?.promptVersion ?? "unknown";
   const inputTokens = chunkResults.reduce(
     (sum, chunk) => sum + (chunk.inputTokens ?? 0),

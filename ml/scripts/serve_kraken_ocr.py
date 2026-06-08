@@ -18,12 +18,38 @@ from pathlib import Path
 from typing import Any
 
 
+def resolve_default_model() -> Path:
+    env = os.environ.get("EDISON_KRAKEN_MODEL", "").strip()
+    if env:
+        return Path(env)
+    candidates = [
+        Path("ml/models/edison-htr.mlmodel"),
+        Path("ml/models/edison-htr-phase2.mlmodel"),
+    ]
+    for prefix in candidates:
+        if prefix.is_dir():
+            safetensors = sorted(prefix.glob("best_*.safetensors"), reverse=True)
+            if safetensors:
+                return safetensors[0]
+            checkpoints = sorted(prefix.glob("checkpoint_*.ckpt"), reverse=True)
+            if checkpoints:
+                return checkpoints[0]
+        if prefix.exists():
+            return prefix
+    return Path("ml/models/en_best.mlmodel")
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--model",
-        default=os.environ.get("EDISON_KRAKEN_MODEL", "ml/models/en_best.mlmodel"),
-        help="Kraken recognition model (.mlmodel or .safetensors)",
+        default=str(resolve_default_model()),
+        help="Kraken recognition model (.mlmodel, .safetensors, or .ckpt)",
+    )
+    parser.add_argument(
+        "--seg-model",
+        default=os.environ.get("EDISON_KRAKEN_SEG_MODEL", ""),
+        help="Optional Edison segmentation model for ketos segment -m (replaces default BLLA).",
     )
     parser.add_argument(
         "--device",
@@ -61,7 +87,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--port", type=int, default=8787)
     parser.add_argument(
         "--model-label",
-        default="local/kraken-en_best-v1",
+        default=os.environ.get("EDISON_KRAKEN_MODEL_LABEL", "local/kraken-edison-v1"),
         help="Value returned in JSON model field",
     )
     return parser.parse_args()
@@ -70,6 +96,7 @@ def parse_args() -> argparse.Namespace:
 @dataclass
 class KrakenRuntime:
     model_path: Path
+    seg_model_path: Path | None
     device: str
     batch_size: int
     precision: str
@@ -119,6 +146,8 @@ def transcribe_image_sync(runtime: KrakenRuntime, image_path: Path) -> tuple[str
         "--num-line-workers",
         str(runtime.num_line_workers),
     ]
+    if runtime.seg_model_path:
+        cmd.extend(["-d", str(runtime.seg_model_path)])
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
     if result.returncode != 0:
         stderr = (result.stderr or "").strip()
@@ -146,8 +175,15 @@ def create_runtime(args: argparse.Namespace) -> KrakenRuntime:
     if subprocess.run(["kraken", "--help"], capture_output=True).returncode != 0:
         raise RuntimeError("kraken CLI is not on PATH. Install kraken>=7.")
 
+    seg_model_path: Path | None = None
+    if args.seg_model.strip():
+        seg_model_path = Path(args.seg_model)
+        if not seg_model_path.exists():
+            raise RuntimeError(f"Kraken segmentation model not found: {seg_model_path}")
+
     return KrakenRuntime(
         model_path=model_path,
+        seg_model_path=seg_model_path,
         device=device,
         batch_size=args.batch_size,
         precision=args.precision,

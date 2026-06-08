@@ -16,7 +16,7 @@ describe("mapLocalOcrResponse", () => {
       ocrText: "Body with [filament?]",
       uncertainReadings: ["[filament?]"],
       model: "local/trocr-base-edison-v1",
-      promptVersion: "local-htr-v1",
+      promptVersion: "local-qwen-vl-v1",
     });
     expect(result.subDocuments).toHaveLength(1);
     expect(result.subDocuments[0]).toMatchObject({

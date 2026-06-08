@@ -9,6 +9,8 @@ import re
 from pathlib import Path
 
 
+IIIF_SUMMARY_SOURCES = {"iiif:abstract", "iiif:description", "iiif:editor's notes", "iiif:editors notes"}
+
 SOURCE_FIELDS = [
     "document_id",
     "folder_id",
@@ -23,6 +25,7 @@ SOURCE_FIELDS = [
     "writer_group",
     "split",
     "quality_notes",
+    "exclude_from_training",
 ]
 
 
@@ -109,6 +112,11 @@ def build_row(document: dict[str, str], transcripts_dir: Path) -> dict[str, str]
     document_id = document["document_id"]
     transcript_path = transcript_for(document_id, transcripts_dir)
     transcript_status = "available" if transcript_path else "missing"
+    transcript_source = (document.get("transcript_source") or "").lower()
+    exclude_from_training = (
+        transcript_source in IIIF_SUMMARY_SOURCES
+        or transcript_source.startswith("iiif:abstract")
+    )
     source_path = document.get("local_image_dir", "")
     return {
         "document_id": document_id,
@@ -124,6 +132,7 @@ def build_row(document: dict[str, str], transcripts_dir: Path) -> dict[str, str]
         "writer_group": infer_writer(document.get("authors", "")),
         "split": document.get("split", "train"),
         "quality_notes": transcript_status,
+        "exclude_from_training": "yes" if exclude_from_training else "no",
     }
 
 

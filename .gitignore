@@ -41,6 +41,8 @@ yarn-error.log*
 next-env.d.ts
 
 # local OCR/HTR datasets and model artifacts
+/ml/.venv/
+/ml/**/__pycache__/
 /ml/data/cache/
 /ml/data/raw/
 /ml/data/manifests/*.csv

@@ -35,8 +35,23 @@ One JSON object per source page.
 One row per document after transcript matching and corpus classification.
 
 ```csv
-document_id,folder_id,source_path,source_mime,page_count,transcript_path,transcript_granularity,document_type,text_mode,layout_type,writer_group,split,quality_notes
+document_id,folder_id,source_path,source_mime,page_count,transcript_path,transcript_granularity,document_type,text_mode,layout_type,writer_group,split,quality_notes,exclude_from_training
 ```
+
+IIIF `Abstract` / `Description` / `Editor's Notes` transcript candidates set
+`exclude_from_training=yes`. They are document-level summaries, not page diplomatic labels.
+
+## Kraken GT Manifest JSONL
+
+One JSON object per accepted Scripto-aligned or hybrid-labeled page.
+
+```json
+{"id":"D9211AFP_fb0685","status":"accepted","label_source":"scripto_vision_agreed","transcript_type":"diplomatic","vision_provider":"gemini","match_ratio":0.86,"validated_lines":6,"pagexml_path":"ml/data/pagexml/D9211AFP_fb0685.xml","split":"train"}
+```
+
+`label_source` values: `scripto`, `scripto_vision_agreed`, `vision_primary`, `ocr_assisted`.
+
+`transcript_type` values: `diplomatic`, `summary`, `ambiguous`.
 
 Use `transcript_granularity` values `missing`, `document`, `page`, `line`, or `region`.
 
@@ -88,3 +103,36 @@ Local OCR services should return this shape. The app can flatten `pages[*].text`
   ]
 }
 ```
+
+## Kraken Ground-Truth Manifest JSONL
+
+One row per page processed by `build_kraken_ground_truth.py`.
+
+Accepted pages (`ml/data/manifests/kraken_gt_manifest.jsonl`):
+
+```json
+{
+  "id": "CL207AAA_00777",
+  "document_id": "CL207AAA",
+  "media_id": 434830,
+  "document_type": "Letter",
+  "image_path": "ml/data/raw/CL207AAA/00777.jpg",
+  "pagexml_path": "ml/data/pagexml/CL207AAA_00777.xml",
+  "scripto_lines": 12,
+  "training_lines": 10,
+  "segmented_lines": 14,
+  "matched_lines": 11,
+  "validated_lines": 10,
+  "match_ratio": 0.79,
+  "mean_match_cer": 0.22,
+  "median_match_cer": 0.18,
+  "split": "train",
+  "quality_flags": [],
+  "status": "accepted"
+}
+```
+
+Rejected pages (`ml/data/manifests/kraken_gt_review.jsonl`) use the same fields plus
+`reason` (for example `match_ratio_below_threshold` or `median_cer_above_threshold`).
+
+Required fields for accepted rows: `id`, `document_id`, `pagexml_path`, `status`.

@@ -1,31 +1,6 @@
 import type { ConfidenceBucket, MetadataExtraction } from "./types";
 import type { TranscribedMetadata } from "./transcribe";
 
-export const TAEP_DOCUMENT_TYPES = [
-  "Letter",
-  "Memorandum",
-  "Telegram",
-  "Report",
-  "Publication",
-  "Payroll Record",
-  "Minutes",
-  "Miscellaneous",
-  "Questionnaire",
-  "List",
-  "Clippings",
-  "Account",
-  "Clipping",
-  "Invitation",
-  "Instructions",
-  "Technical Note",
-  "Notebook page",
-  "Ledger",
-  "Legal document",
-  "Financial statement",
-  "Drawing",
-  "Printed material",
-] as const;
-
 const LEGACY_DOCUMENT_TYPE_MAP: Record<string, string> = {
   correspondence: "Letter",
   telegram: "Telegram",

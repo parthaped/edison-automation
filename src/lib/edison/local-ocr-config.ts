@@ -1,9 +1,16 @@
-/** Shared env helpers for laptop Kraken / local OCR integration. */
+/** Shared env helpers for remote Qwen / HTTP OCR (Amarel pull queue or direct URL). */
+
+import { isGeminiConfigured } from "./gemini-config";
+import { isOcrQueueEnabled } from "./ocr-queue-config";
 
 export function getLocalOcrUrl(
   env: NodeJS.ProcessEnv = process.env,
 ): string | undefined {
-  return env.EDISON_LOCAL_OCR_URL?.trim() || undefined;
+  return (
+    env.EDISON_REMOTE_OCR_URL?.trim() ||
+    env.EDISON_LOCAL_OCR_URL?.trim() ||
+    undefined
+  );
 }
 
 export function getLocalOcrSecret(
@@ -18,22 +25,20 @@ export function isLocalOcrEnabled(
   return Boolean(getLocalOcrUrl(env));
 }
 
-export function isGatewayEnabled(
-  env: NodeJS.ProcessEnv = process.env,
-): boolean {
-  return Boolean(env.AI_GATEWAY_API_KEY?.trim());
-}
-
-/** Ingest transcription runs when AI Gateway or local Kraken OCR is configured. */
+/** Ingest transcription runs when Gemini, OCR queue, or direct HTTP OCR is configured. */
 export function isTranscriptionEnabled(
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
-  return isGatewayEnabled(env) || isLocalOcrEnabled(env);
+  return (
+    isGeminiConfigured(env) ||
+    isOcrQueueEnabled(env) ||
+    isLocalOcrEnabled(env)
+  );
 }
 
-/** Catalog metadata / document splitting via gateway (text-only when Kraken was used). */
-export function shouldUseGatewayForMetadata(
+/** Post-transcribe document splitting via Gemini (text-only when local OCR was used). */
+export function shouldUseGeminiForMetadata(
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
-  return isGatewayEnabled(env);
+  return isGeminiConfigured(env);
 }
