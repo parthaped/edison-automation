@@ -40,13 +40,15 @@ EDISON_GCP_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY--
 
 ### Local development
 
-Either set the JSON env var in `.env.local`, or point to the key file:
+Set the JSON env var in `.env.local`:
 
 ```bash
 EDISON_GCP_PROJECT_ID=my-edison-project-123
-GOOGLE_APPLICATION_CREDENTIALS=C:\path\to\service-account.json
+EDISON_GCP_SERVICE_ACCOUNT_JSON={"type":"service_account",...}
 EDISON_GCP_LOCATION=us-central1
 ```
+
+For **ML scripts only**, you can also use `GOOGLE_APPLICATION_CREDENTIALS=C:\path\to\service-account.json` (see `ml/scripts/gemini_auth.py`). The Next.js app and workflow steps read credentials from env vars only.
 
 ### API endpoint (automatic)
 

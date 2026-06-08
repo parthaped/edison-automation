@@ -1,7 +1,5 @@
 /** Google Gemini via API key (AI Studio) or Vertex AI service account. */
 
-import { readFileSync } from "node:fs";
-
 export const EDISON_GEMINI_API_KEY_ENV = "EDISON_GEMINI_API_KEY";
 
 const GEMINI_API_KEY_ALIASES = [
@@ -98,15 +96,6 @@ export function getServiceAccountCredentials(
       client_email: clientEmail,
       private_key: normalizePrivateKey(privateKey),
     };
-  }
-
-  const credentialsPath = env.GOOGLE_APPLICATION_CREDENTIALS?.trim();
-  if (credentialsPath) {
-    try {
-      return parseServiceAccountJson(readFileSync(credentialsPath, "utf8"));
-    } catch {
-      return undefined;
-    }
   }
 
   return undefined;
