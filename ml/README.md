@@ -131,6 +131,25 @@ See [docs/data-contracts.md](docs/data-contracts.md) for manifest schemas.
 
 See [docs/kraken-local-ocr.md](docs/kraken-local-ocr.md) for T1200 setup, `serve_kraken_ocr.py`, tunnel wiring, and Vercel env vars (`EDISON_LOCAL_OCR_URL`, `EDISON_LOCAL_OCR_SECRET`).
 
+### Production ingest OCR (PaddleOCR-VL + Gemini format)
+
+Ingest transcription is **not** Kraken or Gemini vision. Vercel rasterizes uploads, a pull worker runs **PaddleOCR-VL-1.6**, then Gemini applies Edison Markdown formatting and Omeka metadata from the OCR text only.
+
+```powershell
+# Laptop worker (see ml/docs/laptop-paddleocr-vl-worker.md)
+.\ml\scripts\setup_paddleocr_vl.ps1
+$env:EDISON_VERCEL_URL = "https://your-app.vercel.app"
+$env:EDISON_OCR_WORKER_SECRET = "shared-secret"
+.\ml\scripts\start_edison_worker.ps1
+```
+
+Offline smoke / benchmark:
+
+```powershell
+python ml/scripts/paddleocr_vl_pipeline.py --input path/to/file.pdf
+python ml/scripts/compare_ocr_to_gemini.py --pdf path/to/file.pdf --predictions "paddleocr-vl-1.6=..."
+```
+
 ## First Run
 
 Create a seed file with one folder ID per line:

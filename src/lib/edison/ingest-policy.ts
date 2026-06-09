@@ -1,3 +1,5 @@
+import { isOcrQueueEnabled } from "./ocr-queue-config";
+
 /** Pages per vision LLM call when using page-chunked transcription. */
 export const DEFAULT_PAGE_CHUNK_SIZE = 8;
 
@@ -51,6 +53,24 @@ export function shouldUsePageChunkedTranscription(input: {
   return (
     input.fileSizeBytes >= LARGE_FILE_BYTES || input.pageCount >= LARGE_PAGE_COUNT
   );
+}
+
+/** Route through rasterized page images (OCR queue or chunked Gemini/local). */
+export function shouldUsePageBasedTranscription(input: {
+  mimeType: string;
+  fileSizeBytes: number;
+  pageCount: number;
+  hasPageImages: boolean;
+  env?: NodeJS.ProcessEnv;
+}): boolean {
+  if (!input.hasPageImages) return false;
+  const env = input.env ?? process.env;
+  if (isOcrQueueEnabled(env)) return true;
+  return shouldUsePageChunkedTranscription({
+    mimeType: input.mimeType,
+    fileSizeBytes: input.fileSizeBytes,
+    pageCount: input.pageCount,
+  });
 }
 
 /** Splits 1..pageCount into contiguous inclusive page ranges. */

@@ -1,6 +1,6 @@
 import { z } from "zod";
-import { isGeminiConfigured } from "./gemini-config";
-import { isOcrQueueEnabled } from "./ocr-queue-config";
+import { getGeminiAuthMode, isGeminiConfigured } from "./gemini-config";
+import { isOcrQueueEnabled, isOcrWorkerSecretConfigured } from "./ocr-queue-config";
 import { getLocalOcrUrl, isLocalOcrEnabled } from "./local-ocr-config";
 
 const envSchema = z.object({
@@ -32,7 +32,19 @@ export function getRuntimeCapabilities(
   const localOcr = isLocalOcrEnabled(source);
   const ocrQueue = isOcrQueueEnabled(source);
   const gemini = isGeminiConfigured(source);
+  const geminiAuthMode = getGeminiAuthMode(source);
   const remoteOcrUrl = getLocalOcrUrl(source);
+  const transcriptionMode = ocrQueue
+    ? gemini
+      ? "paddleocr-vl-queue-gemini-format"
+      : "paddleocr-vl-queue-only"
+    : localOcr && gemini
+      ? "local-ocr-gemini-format"
+      : gemini
+        ? "gemini-vision"
+        : localOcr
+          ? "local-ocr-only"
+          : "not-configured";
   return {
     storage: env.DATABASE_URL ? "database-configured" : "development-memory-store",
     files: env.BLOB_READ_WRITE_TOKEN ? "object-storage-configured" : "local-or-deferred-storage",
@@ -47,9 +59,13 @@ export function getRuntimeCapabilities(
               ? "local-ocr-and-gemini-configured"
               : "configured"
         : "not-configured",
+    transcriptionMode,
+    ocrWorkerExpected: ocrQueue ? "paddleocr-vl-1.6" : null,
     localOcr: localOcr ? "configured" : "not-configured",
     ocrQueue: ocrQueue ? "configured" : "not-configured",
+    ocrWorkerSecretConfigured: isOcrWorkerSecretConfigured(source),
     remoteOcrUrl: remoteOcrUrl ?? null,
+    geminiAuthMode,
     omeka: env.OMEKA_API_BASE_URL ? "public-api-configured" : "not-configured",
   };
 }

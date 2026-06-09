@@ -3,6 +3,9 @@ import { ContentHeader } from "@/components/workbench/content-header";
 import { UploadBatchForm } from "@/components/upload-batch-form";
 import { getRuntimeCapabilities } from "@/lib/edison/env";
 
+/** Read Gemini/OCR env at request time (not at `next build` when vars may be absent). */
+export const dynamic = "force-dynamic";
+
 export const metadata = {
   title: "Upload & transcribe · Edison Automation Workbench",
 };
@@ -28,12 +31,20 @@ export default function UploadPage() {
                 Transcription is not configured.
               </strong>{" "}
               Set Vertex (<code className="font-mono">EDISON_GCP_SERVICE_ACCOUNT_JSON</code>) or{" "}
+              <code className="font-mono">GOOGLE_GENERATIVE_AI_API_KEY</code> /{" "}
               <code className="font-mono">EDISON_GEMINI_API_KEY</code>,{" "}
               <code className="font-mono">EDISON_OCR_QUEUE_ENABLED</code>, and/or{" "}
-              <code className="font-mono">EDISON_REMOTE_OCR_URL</code> in{" "}
-              <code className="font-mono">.env.local</code> and restart the dev
-              server. Uploads are still accepted, but transcriptions will be
-              empty.
+              <code className="font-mono">EDISON_REMOTE_OCR_URL</code>. For local
+              dev, put them in <code className="font-mono">.env.local</code> and
+              restart <code className="font-mono">npm run dev</code>. On Vercel,
+              add the same variables in Project Settings → Environment Variables
+              and redeploy. Check{" "}
+              <Link href="/api/health" className="font-medium underline hover:no-underline">
+                /api/health
+              </Link>{" "}
+              (<code className="font-mono">capabilities.ai</code> should not be{" "}
+              <code className="font-mono">not-configured</code>). Uploads are
+              still accepted, but transcriptions will be empty.
             </CapabilityNotice>
           ) : null}
 
@@ -42,8 +53,9 @@ export default function UploadPage() {
               <strong className="font-semibold">Amarel OCR queue.</strong> Page
               transcription waits for an Amarel worker polling{" "}
               <code className="font-mono">/api/ocr/worker/next</code>. Set{" "}
-              <code className="font-mono">EDISON_GEMINI_API_KEY</code> as well
-              for post-transcribe document splitting on large PDFs.
+              <code className="font-mono">GOOGLE_GENERATIVE_AI_API_KEY</code> or{" "}
+              <code className="font-mono">EDISON_GEMINI_API_KEY</code> for Gemini
+              text-only formatting and document splitting.
             </CapabilityNotice>
           ) : null}
 
@@ -51,8 +63,9 @@ export default function UploadPage() {
             <CapabilityNotice>
               <strong className="font-semibold">Remote OCR only.</strong> Page
               transcription uses <code className="font-mono">EDISON_REMOTE_OCR_URL</code>
-              . Set <code className="font-mono">EDISON_GEMINI_API_KEY</code> as well
-              for post-transcribe document splitting on large PDFs.
+              . Set <code className="font-mono">GOOGLE_GENERATIVE_AI_API_KEY</code> or{" "}
+              <code className="font-mono">EDISON_GEMINI_API_KEY</code> for Gemini
+              text-only formatting and document splitting.
             </CapabilityNotice>
           ) : null}
 

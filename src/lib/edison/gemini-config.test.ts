@@ -15,6 +15,14 @@ describe("gemini-config", () => {
     vi.unstubAllEnvs();
   });
 
+  it("reads GOOGLE_GENERATIVE_AI_API_KEY when Edison alias is unset", () => {
+    vi.stubEnv("EDISON_GEMINI_API_KEY", "");
+    vi.stubEnv("GOOGLE_GENERATIVE_AI_API_KEY", " AIza_vercel ");
+    expect(getGeminiApiKey()).toBe("AIza_vercel");
+    expect(getGeminiAuthMode()).toBe("api-key");
+    expect(isGeminiConfigured()).toBe(true);
+  });
+
   it("reads EDISON_GEMINI_API_KEY", () => {
     vi.stubEnv("EDISON_GEMINI_API_KEY", " AIza_test ");
     expect(getGeminiApiKey()).toBe("AIza_test");
@@ -61,6 +69,16 @@ describe("gemini-config", () => {
     } as unknown as NodeJS.ProcessEnv;
     ensureGeminiEnv(env);
     expect(env.GOOGLE_GENERATIVE_AI_API_KEY).toBe("AIza_mirror");
+    expect(env.EDISON_GEMINI_API_KEY).toBe("AIza_mirror");
+  });
+
+  it("keeps GOOGLE_GENERATIVE_AI_API_KEY when only Vercel var is set", () => {
+    const env = {
+      GOOGLE_GENERATIVE_AI_API_KEY: "AIza_vercel",
+    } as unknown as NodeJS.ProcessEnv;
+    ensureGeminiEnv(env);
+    expect(env.GOOGLE_GENERATIVE_AI_API_KEY).toBe("AIza_vercel");
+    expect(env.EDISON_GEMINI_API_KEY).toBe("AIza_vercel");
   });
 
   it("normalizes escaped private key newlines", () => {

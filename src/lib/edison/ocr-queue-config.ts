@@ -12,6 +12,12 @@ export function getOcrWorkerSecret(
   return env.EDISON_OCR_WORKER_SECRET?.trim() || undefined;
 }
 
+export function isOcrWorkerSecretConfigured(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return Boolean(getOcrWorkerSecret(env));
+}
+
 export function getOcrQueuePollMs(
   env: NodeJS.ProcessEnv = process.env,
 ): number {

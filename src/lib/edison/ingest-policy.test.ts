@@ -4,6 +4,7 @@ import {
   effectiveFileConcurrency,
   getPageChunkConcurrency,
   partitionPageRanges,
+  shouldUsePageBasedTranscription,
   shouldUsePageChunkedTranscription,
 } from "./ingest-policy";
 
@@ -34,6 +35,56 @@ describe("shouldUsePageChunkedTranscription", () => {
         mimeType: "image/png",
         fileSizeBytes: 1024 * 1024,
         pageCount: 1,
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("shouldUsePageBasedTranscription", () => {
+  it("uses page images for all PDFs when OCR queue is enabled", () => {
+    const env = { ...process.env, EDISON_OCR_QUEUE_ENABLED: "true" };
+    expect(
+      shouldUsePageBasedTranscription({
+        mimeType: "application/pdf",
+        fileSizeBytes: 1024,
+        pageCount: 5,
+        hasPageImages: true,
+        env,
+      }),
+    ).toBe(true);
+  });
+
+  it("uses page images for single-page images when OCR queue is enabled", () => {
+    const env = { ...process.env, EDISON_OCR_QUEUE_ENABLED: "true" };
+    expect(
+      shouldUsePageBasedTranscription({
+        mimeType: "image/jpeg",
+        fileSizeBytes: 1024,
+        pageCount: 1,
+        hasPageImages: true,
+        env,
+      }),
+    ).toBe(true);
+  });
+
+  it("falls back to large-PDF chunking when queue is disabled", () => {
+    const env = { ...process.env, EDISON_OCR_QUEUE_ENABLED: "false" };
+    expect(
+      shouldUsePageBasedTranscription({
+        mimeType: "application/pdf",
+        fileSizeBytes: 1024,
+        pageCount: 20,
+        hasPageImages: true,
+        env,
+      }),
+    ).toBe(true);
+    expect(
+      shouldUsePageBasedTranscription({
+        mimeType: "application/pdf",
+        fileSizeBytes: 1024,
+        pageCount: 5,
+        hasPageImages: true,
+        env,
       }),
     ).toBe(false);
   });

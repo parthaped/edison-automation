@@ -1,4 +1,4 @@
-import { shouldUsePageChunkedTranscription } from "./ingest-policy";
+import { shouldUsePageBasedTranscription } from "./ingest-policy";
 import type { ExtractionPlan } from "./extraction";
 import type { PageImageUrl } from "./service";
 
@@ -37,10 +37,12 @@ export function shouldDeleteSourceAfterRasterize(input: {
   if (input.prepared.error) return false;
 
   const pageCount = Math.max(1, input.prepared.extractionPlan.pageCount);
-  return shouldUsePageChunkedTranscription({
+  return shouldUsePageBasedTranscription({
     mimeType: input.blob.contentType,
     fileSizeBytes: input.blob.size,
     pageCount,
+    hasPageImages: input.prepared.urls.length > 0,
+    env: input.env,
   });
 }
 
@@ -54,10 +56,12 @@ export function shouldDeleteSourceAfterTranscribe(input: {
   if (shouldDeleteSourceAfterRasterize(input)) return false;
 
   const pageCount = Math.max(1, input.prepared.extractionPlan.pageCount);
-  const usesWholeFilePath = !shouldUsePageChunkedTranscription({
+  const usesWholeFilePath = !shouldUsePageBasedTranscription({
     mimeType: input.blob.contentType,
     fileSizeBytes: input.blob.size,
     pageCount,
+    hasPageImages: input.prepared.urls.length > 0,
+    env: input.env,
   });
 
   if (!usesWholeFilePath) return false;

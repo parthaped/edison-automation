@@ -64,9 +64,17 @@ def resolve_kraken_cli() -> str:
     return "kraken"
 
 
+def kraken_subprocess_env() -> dict[str, str]:
+    env = os.environ.copy()
+    env.setdefault("PYTHONIOENCODING", "utf-8")
+    env.setdefault("PYTHONUTF8", "1")
+    return env
+
+
 def run_kraken_full_page(
     image_path: Path,
     model_path: Path,
+    output_path: Path,
     *,
     device: str,
     batch_size: int,
@@ -74,14 +82,21 @@ def run_kraken_full_page(
     num_line_workers: int,
 ) -> str:
     kraken_cli = resolve_kraken_cli()
-    if subprocess.run([kraken_cli, "--help"], capture_output=True).returncode != 0:
+    if subprocess.run(
+        [kraken_cli, "--help"],
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        env=kraken_subprocess_env(),
+    ).returncode != 0:
         raise RuntimeError("kraken CLI is not installed. Run setup_kraken_cuda.ps1.")
 
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     cmd = [
         kraken_cli,
         "-i",
         str(image_path),
-        "stdout",
+        str(output_path),
         "--device",
         device,
         "--precision",
@@ -96,11 +111,21 @@ def run_kraken_full_page(
         "--num-line-workers",
         str(num_line_workers),
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+    result = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        env=kraken_subprocess_env(),
+        timeout=600,
+    )
     if result.returncode != 0:
         stderr = (result.stderr or "").strip()
         raise RuntimeError(stderr or f"kraken exited with {result.returncode}")
-    return (result.stdout or "").strip()
+    if not output_path.exists():
+        raise RuntimeError(f"kraken did not write output to {output_path}")
+    return output_path.read_text(encoding="utf-8").strip()
 
 
 def load_reference(args: argparse.Namespace) -> str:
@@ -142,12 +167,12 @@ def main() -> int:
         kraken_text = run_kraken_full_page(
             image_path,
             model_path,
+            kraken_out,
             device=args.kraken_device,
             batch_size=args.kraken_batch_size,
             precision=args.kraken_precision,
             num_line_workers=args.kraken_num_line_workers,
         )
-        kraken_out.write_text(kraken_text + ("\n" if kraken_text else ""), encoding="utf-8")
         print(f"Wrote {kraken_out}", file=sys.stderr)
 
     qwen_text = ""

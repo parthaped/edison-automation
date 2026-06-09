@@ -1,0 +1,2 @@
+# PaddleOCR-VL doc parser (install paddlepaddle separately in setup script).
+paddleocr[doc-parser]>=3.6.0

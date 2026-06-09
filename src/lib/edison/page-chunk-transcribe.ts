@@ -103,7 +103,10 @@ const PAGE_CHUNK_INSTRUCTION =
   "Transcribe ONLY the page images provided in this request. Return one entry per page with the correct pageNumber. Do not infer content from pages you cannot see.";
 
 const CHUNKED_SPLIT_INSTRUCTION =
-  "You are given OCR text for every page of a source PDF. Decide whether the source contains ONE document or MULTIPLE separate documents stitched together. Boundary signals include new letterhead, new dateline, new salutation/closing pair, explicit end markers, blank separator pages, or obvious changes in subject/format. Return contiguous, non-overlapping page ranges that cover every page. If uncertain, prefer fewer splits.";
+  "You are given already-transcribed OCR text for every page of a source PDF. Do NOT rewrite or re-transcribe the text. Decide whether the source contains ONE document or MULTIPLE separate documents stitched together. Boundary signals include new letterhead, new dateline, new salutation/closing pair, explicit end markers, blank separator pages, or obvious changes in subject/format. Return contiguous, non-overlapping page ranges that cover every page. If uncertain, prefer fewer splits.";
+
+const CHUNKED_METADATA_INSTRUCTION =
+  "For EACH returned sub-document, index it for the TAEP Omeka-S catalog from the provided OCR text only. Leave fields empty rather than guessing.";
 
 async function fetchImageBytes(url: string): Promise<Uint8Array> {
   const response = await fetch(url);
@@ -328,9 +331,6 @@ export async function analyzeChunkedDocumentStructure(input: {
   signal?: AbortSignal;
 }): Promise<ChunkedSubDocumentPlan[]> {
   const modelLabel = input.model ?? getDefaultOcrModelLabel();
-  const activePrompt = getActivePrompt(
-    input.promptTask ?? "diplomatic-transcription",
-  );
   const pageText = input.pages
     .map((page) => {
       const text = page.text.trim() || "[No legible text returned for this page]";
@@ -338,36 +338,44 @@ export async function analyzeChunkedDocumentStructure(input: {
     })
     .join("\n\n");
 
-  const result = await generateText({
-    model: resolveGeminiModel(modelLabel),
-    abortSignal: input.signal,
-    output: Output.object({ schema: chunkedStructureSchema }),
-    messages: [
-      {
-        role: "user",
-        content: `${activePrompt.prompt}\n\n${CHUNKED_SPLIT_INSTRUCTION}\n\nFor EACH returned sub-document, also index it for the TAEP Omeka-S catalog. Leave fields empty rather than guessing.\n\nTotal pages: ${input.totalPages}\n\n${pageText}`,
-      },
-    ],
-  });
+  const { signal, cleanup } = combineSignals(
+    input.signal,
+    getRequestTimeoutMs(),
+  );
+  try {
+    const result = await generateText({
+      model: resolveGeminiModel(modelLabel),
+      abortSignal: signal,
+      output: Output.object({ schema: chunkedStructureSchema }),
+      messages: [
+        {
+          role: "user",
+          content: `${CHUNKED_SPLIT_INSTRUCTION}\n\n${CHUNKED_METADATA_INSTRUCTION}\n\nTotal pages: ${input.totalPages}\n\n${pageText}`,
+        },
+      ],
+    });
 
-  return (result.output.subDocuments ?? [])
-    .slice()
-    .sort((a, b) => a.startPage - b.startPage)
-    .map((entry) => ({
-      startPage: entry.startPage,
-      endPage: Math.max(entry.startPage, entry.endPage),
-      metadata: {
-        title: entry.title?.trim() || "",
-        documentType: entry.documentType?.trim() || "",
-        date: entry.date?.trim() || "",
-        authors: entry.authors ?? [],
-        recipients: entry.recipients ?? [],
-        mentionedNames: entry.mentionedNames ?? [],
-        subjects: entry.subjects ?? [],
-        places: entry.places ?? [],
-        comments: entry.comments?.trim() || undefined,
-      },
-    }));
+    return (result.output.subDocuments ?? [])
+      .slice()
+      .sort((a, b) => a.startPage - b.startPage)
+      .map((entry) => ({
+        startPage: entry.startPage,
+        endPage: Math.max(entry.startPage, entry.endPage),
+        metadata: {
+          title: entry.title?.trim() || "",
+          documentType: entry.documentType?.trim() || "",
+          date: entry.date?.trim() || "",
+          authors: entry.authors ?? [],
+          recipients: entry.recipients ?? [],
+          mentionedNames: entry.mentionedNames ?? [],
+          subjects: entry.subjects ?? [],
+          places: entry.places ?? [],
+          comments: entry.comments?.trim() || undefined,
+        },
+      }));
+  } finally {
+    cleanup();
+  }
 }
 
 export function mergePageChunkResults(

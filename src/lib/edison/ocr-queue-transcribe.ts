@@ -20,8 +20,8 @@ function mapOcrQueueJobToChunkResult(
         text: (page.text ?? "").trim(),
       }))
       .sort((left, right) => left.pageNumber - right.pageNumber),
-    model: job.model ?? "local/qwen2.5-vl-7b-instruct",
-    promptVersion: job.promptVersion ?? "local-qwen-vl-v1",
+    model: job.model ?? "local/paddleocr-vl-1.6",
+    promptVersion: job.promptVersion ?? "paddleocr-vl-v1",
   };
 }
 

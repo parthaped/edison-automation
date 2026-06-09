@@ -1,13 +1,20 @@
 /** Google Gemini via API key (AI Studio) or Vertex AI service account. */
 
+/** Primary Edison alias; Vercel often sets {@link GOOGLE_GENERATIVE_AI_API_KEY} instead (both work). */
 export const EDISON_GEMINI_API_KEY_ENV = "EDISON_GEMINI_API_KEY";
+
+export const GOOGLE_GENERATIVE_AI_API_KEY_ENV = "GOOGLE_GENERATIVE_AI_API_KEY";
 
 const GEMINI_API_KEY_ALIASES = [
   EDISON_GEMINI_API_KEY_ENV,
-  "GOOGLE_GENERATIVE_AI_API_KEY",
+  GOOGLE_GENERATIVE_AI_API_KEY_ENV,
   "GEMINI_API_KEY",
   "GOOGLE_API_KEY",
 ] as const;
+
+/** Human-readable hint for setup docs and UI copy. */
+export const GEMINI_API_KEY_ENV_HINT =
+  "GOOGLE_GENERATIVE_AI_API_KEY or EDISON_GEMINI_API_KEY";
 
 export const DEFAULT_VERTEX_LOCATION = "us-central1";
 
@@ -124,6 +131,9 @@ export function ensureGeminiEnv(env: NodeJS.ProcessEnv = process.env): void {
   const apiKey = getGeminiApiKey(env);
   if (apiKey) {
     env.GOOGLE_GENERATIVE_AI_API_KEY = apiKey;
+    if (!env[EDISON_GEMINI_API_KEY_ENV]?.trim()) {
+      env[EDISON_GEMINI_API_KEY_ENV] = apiKey;
+    }
   }
 }
 

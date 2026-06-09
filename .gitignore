@@ -42,6 +42,8 @@ next-env.d.ts
 
 # local OCR/HTR datasets and model artifacts
 /ml/.venv/
+/ml/.venv-surya-trocr/
+/ml/.venv-paddle-vl/
 /ml/**/__pycache__/
 /ml/data/cache/
 /ml/data/raw/

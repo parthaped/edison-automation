@@ -47,7 +47,12 @@ def load_local_env() -> None:
 
 def ensure_gemini_env() -> None:
     """Mirror Edison Gemini key for libraries that read GOOGLE_GENERATIVE_AI_API_KEY."""
-    api_key = _gemini_api_key()
+    api_key = None
+    for name in GEMINI_API_KEY_ALIASES:
+        value = os.environ.get(name, "").strip()
+        if value:
+            api_key = value
+            break
     if api_key:
         os.environ[EDISON_GEMINI_API_KEY_ENV] = api_key
         os.environ["GOOGLE_GENERATIVE_AI_API_KEY"] = api_key
@@ -147,7 +152,7 @@ def resolve_label_provider(
             return provider
         raise RuntimeError(
             "Gemini requested but not configured. Set EDISON_GCP_SERVICE_ACCOUNT_JSON "
-            "+ EDISON_GCP_PROJECT_ID (Vertex), or EDISON_GEMINI_API_KEY."
+            "+ EDISON_GCP_PROJECT_ID (Vertex), or GOOGLE_GENERATIVE_AI_API_KEY / EDISON_GEMINI_API_KEY."
         )
 
     if prefer == "kraken_phase2":

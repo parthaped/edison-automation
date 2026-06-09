@@ -1,5 +1,7 @@
 # Qwen OCR on Amarel + Vercel (no Cloudflare)
 
+> **Laptop / default production path:** see [laptop-paddleocr-vl-worker.md](./laptop-paddleocr-vl-worker.md) (PaddleOCR-VL-1.6 worker).
+
 Use Rutgers Amarel GPUs for transcription **without** exposing Amarel to the internet. Amarel makes **outbound** HTTPS calls to your Vercel app; Vercel never needs to reach campus.
 
 Kraken is not required.
@@ -28,7 +30,7 @@ Vercel workflow continues
 |----------|--------|
 | `EDISON_OCR_QUEUE_ENABLED` | `true` |
 | `EDISON_OCR_WORKER_SECRET` | Long random shared secret |
-| `EDISON_GEMINI_API_KEY` | For post-OCR structure/metadata (text-only) |
+| `GOOGLE_GENERATIVE_AI_API_KEY` or `EDISON_GEMINI_API_KEY` | For post-OCR format + structure (text-only) |
 | `BLOB_READ_WRITE_TOKEN` | Already required for uploads |
 | `EDISON_OCR_QUEUE_TIMEOUT_MS` | `7200000` (2h) for large PDFs on a busy queue |
 | `EDISON_OCR_QUEUE_POLL_MS` | `5000` |

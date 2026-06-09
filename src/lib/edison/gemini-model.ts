@@ -58,7 +58,7 @@ export function resolveGeminiModel(
   const apiKey = getGeminiApiKey(env);
   if (!apiKey) {
     throw new Error(
-      "Gemini is not configured. Set EDISON_GCP_SERVICE_ACCOUNT_JSON + EDISON_GCP_PROJECT_ID (Vertex), or EDISON_GEMINI_API_KEY (AI Studio).",
+      "Gemini is not configured. Set EDISON_GCP_SERVICE_ACCOUNT_JSON + EDISON_GCP_PROJECT_ID (Vertex), or GOOGLE_GENERATIVE_AI_API_KEY / EDISON_GEMINI_API_KEY (AI Studio).",
     );
   }
 

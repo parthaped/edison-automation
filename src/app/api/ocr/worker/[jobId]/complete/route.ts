@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { isAuthorizedOcrWorker } from "@/lib/edison/ocr-queue-auth";
+import {
+  getOcrWorkerSecret,
+  isOcrQueueEnabled,
+} from "@/lib/edison/ocr-queue-config";
 import { completeOcrQueueJob, failOcrQueueJob } from "@/lib/edison/ocr-queue-store";
 
 const completeBodySchema = z.object({
@@ -22,8 +26,26 @@ export async function POST(
   request: Request,
   context: { params: Promise<{ jobId: string }> },
 ) {
+  if (!isOcrQueueEnabled()) {
+    return NextResponse.json(
+      { error: "OCR queue is disabled on this deployment." },
+      { status: 503 },
+    );
+  }
+  if (!getOcrWorkerSecret()) {
+    return NextResponse.json(
+      { error: "OCR worker secret is not configured on this deployment." },
+      { status: 503 },
+    );
+  }
   if (!isAuthorizedOcrWorker(request)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json(
+      {
+        error:
+          "Unauthorized. EDISON_OCR_WORKER_SECRET must match on worker and Vercel.",
+      },
+      { status: 401 },
+    );
   }
 
   const { jobId } = await context.params;
