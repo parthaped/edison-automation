@@ -31,3 +31,23 @@ def load_page_images(input_path: Path, dpi: int = 300) -> list[tuple[str, Image.
     if suffix in {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".webp"}:
         return [(input_path.stem, Image.open(input_path).convert("RGB"))]
     raise RuntimeError(f"Unsupported input type: {input_path}")
+
+
+def assemble_images_to_pdf(image_paths: list[Path], output_path: Path) -> Path:
+    """Build a temporary multi-page PDF from rasterized page JPEGs."""
+    try:
+        import fitz
+    except ImportError as error:
+        raise RuntimeError("Install pymupdf to assemble page images into a PDF.") from error
+
+    doc = fitz.open()
+    try:
+        for image_path in image_paths:
+            with fitz.open(str(image_path)) as image_doc:
+                rect = image_doc[0].rect
+                page = doc.new_page(width=rect.width, height=rect.height)
+                page.insert_image(rect, filename=str(image_path))
+        doc.save(str(output_path))
+    finally:
+        doc.close()
+    return output_path

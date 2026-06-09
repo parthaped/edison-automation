@@ -17,6 +17,7 @@ import os
 import sys
 import tempfile
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Protocol
 from urllib.error import HTTPError, URLError
@@ -32,6 +33,8 @@ class OcrBackend(Protocol):
     prompt_version: str
 
     def transcribe_image(self, image_path: Path) -> str: ...
+
+    def transcribe_image_paths(self, image_paths: list[Path]) -> list[str]: ...
 
 
 def parse_args() -> argparse.Namespace:
@@ -155,6 +158,9 @@ def create_backend(args: argparse.Namespace) -> OcrBackend:
                 lines, _raw = runtime.transcriber.transcribe_page(image_path)
                 return "\n".join(lines)
 
+            def transcribe_image_paths(self, image_paths: list[Path]) -> list[str]:
+                return [self.transcribe_image(path) for path in image_paths]
+
         return QwenBackend()
 
     from paddleocr_vl_lib import PROMPT_VERSION, create_runtime as create_paddle_runtime
@@ -168,26 +174,70 @@ def create_backend(args: argparse.Namespace) -> OcrBackend:
         def transcribe_image(self, image_path: Path) -> str:
             return runtime.transcribe_image(image_path)
 
+        def transcribe_image_paths(self, image_paths: list[Path]) -> list[str]:
+            return runtime.transcribe_image_paths_as_pdf(image_paths)
+
     return PaddleBackend()
 
 
-def transcribe_job(backend: OcrBackend, job: dict[str, Any]) -> dict[str, Any]:
-    pages_out: list[dict[str, Any]] = []
-    for page in job["pages"]:
+def download_job_pages(
+    pages: list[dict[str, Any]],
+    *,
+    workers: int = 4,
+) -> list[tuple[int, Path]]:
+    ordered = sorted(pages, key=lambda page: int(page["pageNumber"]))
+    results: list[tuple[int, Path]] = []
+
+    def fetch(page: dict[str, Any]) -> tuple[int, Path]:
         page_number = int(page["pageNumber"])
-        image_url = str(page["imageUrl"])
         with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as handle:
             temp_path = Path(handle.name)
-        try:
-            download_image(image_url, temp_path)
-            text = backend.transcribe_image(temp_path)
-            pages_out.append({"pageNumber": page_number, "text": text})
-            print(
-                f"job={job['jobId']} page={page_number} chars={len(text)}",
-                file=sys.stderr,
-            )
-        finally:
-            temp_path.unlink(missing_ok=True)
+        download_image(str(page["imageUrl"]), temp_path)
+        return page_number, temp_path
+
+    worker_count = max(1, min(workers, len(ordered)))
+    with ThreadPoolExecutor(max_workers=worker_count) as pool:
+        futures = [pool.submit(fetch, page) for page in ordered]
+        for future in as_completed(futures):
+            results.append(future.result())
+
+    results.sort(key=lambda item: item[0])
+    return results
+
+
+def transcribe_job(backend: OcrBackend, job: dict[str, Any]) -> dict[str, Any]:
+    job_id = str(job["jobId"])
+    started = time.perf_counter()
+    downloaded = download_job_pages(job["pages"])
+    download_ms = int((time.perf_counter() - started) * 1000)
+    print(
+        f"job={job_id} downloaded {len(downloaded)} pages in {download_ms}ms",
+        file=sys.stderr,
+    )
+
+    temp_paths = [path for _, path in downloaded]
+    ocr_started = time.perf_counter()
+    try:
+        texts = backend.transcribe_image_paths(temp_paths)
+    finally:
+        for path in temp_paths:
+            path.unlink(missing_ok=True)
+
+    ocr_ms = int((time.perf_counter() - ocr_started) * 1000)
+    pages_out: list[dict[str, Any]] = []
+    for index, (page_number, _) in enumerate(downloaded):
+        text = texts[index] if index < len(texts) else ""
+        pages_out.append({"pageNumber": page_number, "text": text})
+        print(
+            f"job={job_id} page={page_number} chars={len(text)}",
+            file=sys.stderr,
+        )
+
+    total_ms = int((time.perf_counter() - started) * 1000)
+    print(
+        f"job={job_id} ocr={ocr_ms}ms total={total_ms}ms pages={len(pages_out)}",
+        file=sys.stderr,
+    )
 
     return {
         "pages": pages_out,

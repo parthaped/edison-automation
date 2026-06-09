@@ -22,6 +22,10 @@ import {
   GlobalWorkerOptions,
 } from "pdfjs-dist/legacy/build/pdf.mjs";
 import * as pdfWorker from "pdfjs-dist/legacy/build/pdf.worker.mjs";
+import {
+  isRasterWhitespaceTrimEnabled,
+  trimJpegWhitespace,
+} from "./trim-jpeg-whitespace";
 
 declare global {
   // pdfjs checks this before dynamic-importing the worker in Node.
@@ -65,9 +69,11 @@ export interface RasterizePdfOptions {
 export async function rasterizePdfPages(
   bytes: Uint8Array,
   options: RasterizePdfOptions = {},
+  env: NodeJS.ProcessEnv = process.env,
 ): Promise<RasterizedPage[]> {
   const scale = options.scale ?? DEFAULT_SCALE;
   const quality = options.quality ?? DEFAULT_JPEG_QUALITY;
+  const trimWhitespace = isRasterWhitespaceTrimEnabled(env);
 
   // pdfjs-dist consumes the buffer it is given, so pass a fresh copy. The
   // ingest workflow may reuse the source bytes elsewhere.
@@ -89,10 +95,10 @@ export async function rasterizePdfPages(
       const page = await pdf.getPage(pageNumber);
       try {
         const viewport = page.getViewport({ scale });
-        const width = Math.ceil(viewport.width);
-        const height = Math.ceil(viewport.height);
+        const canvasWidth = Math.ceil(viewport.width);
+        const canvasHeight = Math.ceil(viewport.height);
 
-        const canvas = createCanvas(width, height);
+        const canvas = createCanvas(canvasWidth, canvasHeight);
         // pdfjs's modern render API takes the canvas directly (it allocates
         // the 2D context itself). The @napi-rs/canvas Canvas mirrors the
         // HTMLCanvasElement shape pdfjs uses, so we cast through unknown.
@@ -102,9 +108,18 @@ export async function rasterizePdfPages(
         }).promise;
 
         const jpg = await canvas.encode("jpeg", quality);
+        let pageJpg = new Uint8Array(jpg);
+        let width = canvasWidth;
+        let height = canvasHeight;
+        if (trimWhitespace) {
+          const trimmed = await trimJpegWhitespace(pageJpg);
+          pageJpg = new Uint8Array(trimmed.jpg);
+          width = trimmed.width;
+          height = trimmed.height;
+        }
         pages.push({
           pageIndex: pageNumber - 1,
-          jpg: new Uint8Array(jpg),
+          jpg: pageJpg,
           width,
           height,
         });

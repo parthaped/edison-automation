@@ -98,6 +98,8 @@ python ml/scripts/compare_ocr_to_gemini.py --pdf "C:\path\to\file.pdf" --predict
 | Workflow times out | Raise `EDISON_OCR_QUEUE_TIMEOUT_MS`; ensure worker is running |
 | GPU OOM on laptop | Use `--device cpu` or process one job at a time |
 | CUDNN warning | Paddle may warn about CUDNN version mismatch; usually still runs |
+| OCR slower than local CLI | Worker now batches pages into one PDF `predict()` call (same as `paddleocr_vl_pipeline.py`). Restart the worker after pulling latest code. Start worker **before** upload to skip idle polling. |
+| Wide white margins in viewer | New uploads trim PDF media-box margins during rasterize. Re-upload affected PDFs after deploying the latest app code. |
 
 Verify auth before starting the worker:
 

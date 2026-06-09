@@ -8,6 +8,10 @@ import {
   type RasterizePdfOptions,
   type RasterizedPage,
 } from "./rasterize-pdf";
+import {
+  isRasterWhitespaceTrimEnabled,
+  trimJpegWhitespace,
+} from "./trim-jpeg-whitespace";
 
 const execFileAsync = promisify(execFile);
 
@@ -81,6 +85,7 @@ async function rasterizeWithPdftoppm(
         "-jpeg",
         "-jpegopt",
         `quality=${quality}`,
+        "-cropbox",
         "-scale-to-x",
         String(targetWidth),
         inputPath,
@@ -93,15 +98,24 @@ async function rasterizeWithPdftoppm(
       .filter((name) => name.startsWith("page-") && name.endsWith(".jpg"))
       .sort();
 
+    const trimWhitespace = isRasterWhitespaceTrimEnabled();
     const pages: RasterizedPage[] = [];
     for (const [index, fileName] of files.entries()) {
       options.signal?.throwIfAborted?.();
-      const jpg = await readFile(join(tempDir, fileName));
+      let jpg = new Uint8Array(await readFile(join(tempDir, fileName)));
+      let width = targetWidth;
+      let height = Math.round(targetWidth * 1.294);
+      if (trimWhitespace) {
+        const trimmed = await trimJpegWhitespace(jpg);
+        jpg = new Uint8Array(trimmed.jpg);
+        width = trimmed.width;
+        height = trimmed.height;
+      }
       pages.push({
         pageIndex: index,
-        jpg: new Uint8Array(jpg),
-        width: targetWidth,
-        height: Math.round(targetWidth * 1.294),
+        jpg,
+        width,
+        height,
       });
     }
     return pages;

@@ -5,7 +5,7 @@ param(
   [string]$VercelUrl = $env:EDISON_VERCEL_URL,
   [string]$WorkerSecret = $env:EDISON_OCR_WORKER_SECRET,
   [string]$WorkerId = "laptop-paddle-vl",
-  [int]$IdleSleep = 10
+  [int]$IdleSleep = 3
 )
 
 $ErrorActionPreference = "Stop"

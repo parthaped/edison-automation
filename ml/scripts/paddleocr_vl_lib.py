@@ -78,6 +78,29 @@ class PaddleOcrVlRuntime:
             results = self.pipeline.restructure_pages(pages_res, concatenate_pages=True)
         return [markdown_from_result(result) for result in results if markdown_from_result(result)]
 
+    def transcribe_image_paths_as_pdf(self, image_paths: list[Path]) -> list[str]:
+        from pdf_page_utils import assemble_images_to_pdf
+
+        if not image_paths:
+            return []
+        if len(image_paths) == 1:
+            return [self.transcribe_image(image_paths[0])]
+
+        import tempfile
+
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as handle:
+            temp_pdf = Path(handle.name)
+        try:
+            assemble_images_to_pdf(image_paths, temp_pdf)
+            texts = self.transcribe_pdf(temp_pdf, concatenate_pages=False)
+            if len(texts) >= len(image_paths):
+                return texts[: len(image_paths)]
+            padded = list(texts)
+            padded.extend([""] * (len(image_paths) - len(texts)))
+            return padded
+        finally:
+            temp_pdf.unlink(missing_ok=True)
+
 
 def create_runtime(
     *,
