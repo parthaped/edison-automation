@@ -59,7 +59,7 @@ def write_pagexml(
 
     metadata = ET.SubElement(root, f"{{{PAGE_NS}}}Metadata")
     creator = ET.SubElement(metadata, f"{{{PAGE_NS}}}Creator")
-    creator.text = "edison-automation build_kraken_ground_truth"
+    creator.text = "edison-papers-research build_kraken_ground_truth"
     created = ET.SubElement(metadata, f"{{{PAGE_NS}}}Created")
     created.text = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 

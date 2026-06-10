@@ -19,8 +19,8 @@ from typing import Any, Iterator
 BASE_URL = "https://edisondigital.rutgers.edu"
 SCRIPTOTRANSCRIPTION_PROPERTY_ID = 186
 DEFAULT_USER_AGENT = (
-    "Mozilla/5.0 (compatible; edison-automation-omeka/0.1; "
-    "+https://github.com/parthaped/edison-automation)"
+    "Mozilla/5.0 (compatible; edison-papers-research-omeka/0.1; "
+    "+https://edison-papers-research.vercel.app)"
 )
 
 

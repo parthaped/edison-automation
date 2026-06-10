@@ -1,7 +1,7 @@
 {
-  "name": "edison-automation",
+  "name": "edison-papers-research",
   "version": "0.1.0",
-  "description": "Production workbench for Edison Papers transcription review, confidence grading, feedback-guided agents, and Omeka-ready indexing.",
+  "description": "Edison Papers Research Platform — semantic search across edisondigital.rutgers.edu plus a secured staff workbench for transcription review and Omeka export.",
   "private": true,
   "repository": {
     "type": "git",
@@ -15,14 +15,19 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "wipe:blob": "node scripts/wipe-blob-store.mjs"
+    "wipe:blob": "node scripts/wipe-blob-store.mjs",
+    "search:harvest": "python ml/scripts/build_search_index.py",
+    "search:minisearch": "node scripts/build-minisearch-index.mjs",
+    "search:upload": "node --env-file=.env.local scripts/upload-search-index.mjs",
+    "search:build": "python ml/scripts/build_search_index.py && node scripts/build-minisearch-index.mjs && node --env-file=.env.local scripts/upload-search-index.mjs",
+    "search:build:local": "python ml/scripts/build_search_index.py && node scripts/build-minisearch-index.mjs"
   },
   "dependencies": {
+    "@ai-sdk/google": "^2.0.23",
+    "@ai-sdk/google-vertex": "^3.0.29",
     "@base-ui/react": "^1.5.0",
     "@napi-rs/canvas": "^1.0.0",
     "@types/jszip": "^3.4.0",
-    "@ai-sdk/google": "^2.0.23",
-    "@ai-sdk/google-vertex": "^3.0.29",
     "@vercel/blob": "^2.4.0",
     "@workflow/next": "^4.0.6",
     "ai": "^6.0.191",
@@ -30,6 +35,7 @@
     "clsx": "^2.1.1",
     "jszip": "^3.10.1",
     "lucide-react": "^1.16.0",
+    "minisearch": "^7.2.0",
     "motion": "^12.40.0",
     "next": "16.2.6",
     "pdf-lib": "1.17.1",

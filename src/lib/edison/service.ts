@@ -1,4 +1,6 @@
 import { AppError } from "./app-error";
+import { validateContiguousSplits } from "./split-validation";
+export { checkSplitRules, validateContiguousSplits } from "./split-validation";
 import {
   InMemoryAuditLog,
   type AuditEvent,
@@ -247,57 +249,6 @@ export async function processSourceFile(
   };
 }
 
-// Validates that a user-supplied splits payload covers every page in the
-// source PDF exactly once: the splits must be sorted, contiguous, and cover
-// 1..totalPages. Throws AppError("BAD_REQUEST") on any violation; returns
-// silently on success.
-export function validateContiguousSplits(
-  splits: Array<{ startPage: number; endPage: number }>,
-  totalPages: number,
-): void {
-  if (!Array.isArray(splits) || splits.length === 0) {
-    throw new AppError("BAD_REQUEST", "Provide at least one split.", 400);
-  }
-  let cursor = 0;
-  for (const [index, split] of splits.entries()) {
-    if (!Number.isInteger(split.startPage) || !Number.isInteger(split.endPage)) {
-      throw new AppError(
-        "BAD_REQUEST",
-        `Split ${index + 1} must have integer page numbers.`,
-        400,
-      );
-    }
-    if (split.startPage !== cursor + 1) {
-      throw new AppError(
-        "BAD_REQUEST",
-        `Split ${index + 1} must start at page ${cursor + 1} but starts at ${split.startPage}.`,
-        400,
-      );
-    }
-    if (split.endPage < split.startPage) {
-      throw new AppError(
-        "BAD_REQUEST",
-        `Split ${index + 1} ends (${split.endPage}) before it starts (${split.startPage}).`,
-        400,
-      );
-    }
-    if (split.endPage > totalPages) {
-      throw new AppError(
-        "BAD_REQUEST",
-        `Split ${index + 1} ends at page ${split.endPage}, beyond the source's ${totalPages} pages.`,
-        400,
-      );
-    }
-    cursor = split.endPage;
-  }
-  if (cursor !== totalPages) {
-    throw new AppError(
-      "BAD_REQUEST",
-      `Splits must cover every page; last split ends at ${cursor} but source has ${totalPages} pages.`,
-      400,
-    );
-  }
-}
 
 // ---------- multi-sub-document processing ----------
 //
@@ -626,11 +577,6 @@ export class EdisonAutomationService {
     }
   }
 
-  async getDashboard(): Promise<{ summary: DashboardSummary }> {
-    const documents = await this.repository.listDocuments();
-    return { summary: summarizeDocuments(documents) };
-  }
-
   // Loads review workbench data. Summary counts scan every record; the review
   // queue loads one paginated window so large datasets do not fetch every JSON
   // body on each page view.
@@ -662,10 +608,6 @@ export class EdisonAutomationService {
       reviewLimit: page.limit,
       hasMoreReviewDocuments: page.hasMore,
     };
-  }
-
-  async getReviewCase(documentId?: string) {
-    return this.repository.getReviewCase(documentId);
   }
 
   async getDocumentRecord(documentId: string) {

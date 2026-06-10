@@ -13,7 +13,7 @@ $Root = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 Set-Location $Root
 
 if (-not $VercelUrl) {
-  throw "Set EDISON_VERCEL_URL to your Vercel deployment URL."
+  $VercelUrl = "https://edison-papers-research.vercel.app"
 }
 if (-not $WorkerSecret) {
   throw "Set EDISON_OCR_WORKER_SECRET to match Vercel."

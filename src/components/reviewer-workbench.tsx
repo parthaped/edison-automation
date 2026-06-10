@@ -25,6 +25,7 @@ import {
   leadDocumentIdForFileIndex,
 } from "@/lib/edison/review-navigation";
 import { formatGloc } from "@/lib/edison/metadata-normalize";
+import { checkSplitRules } from "@/lib/edison/split-validation";
 import type {
   ConfidenceBucket,
   DocumentPackage,
@@ -140,7 +141,7 @@ export function ReviewerWorkbench({
         </h3>
         <p className="mt-2 text-sm text-muted-foreground">
           Approved documents move to the{" "}
-          <Link href="/past" className="underline">
+          <Link href="/workbench/past" className="underline">
             Past verifications
           </Link>{" "}
           tab. New uploads will appear here after ingest completes.
@@ -168,7 +169,7 @@ export function ReviewerWorkbench({
     const leadId = leadDocumentIdForFileIndex(fileNavUnits, fileIndex);
     if (!leadId) return;
     setSelectedDocumentId(leadId);
-    router.push(`/review?doc=${encodeURIComponent(leadId)}`);
+    router.push(`/workbench/review?doc=${encodeURIComponent(leadId)}`);
   }
 
   const isBlocked = activeDocument.status === "blocked";
@@ -218,10 +219,10 @@ export function ReviewerWorkbench({
       removeFileFromQueue(approvedDocumentId);
       if (nextFileLeadId) {
         setSelectedDocumentId(nextFileLeadId);
-        router.push(`/review?doc=${encodeURIComponent(nextFileLeadId)}`);
+        router.push(`/workbench/review?doc=${encodeURIComponent(nextFileLeadId)}`);
       } else {
         setSelectedDocumentId(null);
-        router.push("/review");
+        router.push("/workbench/review");
       }
       // Refresh so the dashboard counts and the paginated review window
       // reload with the new state (e.g. next page of documents fills in).
@@ -266,7 +267,7 @@ export function ReviewerWorkbench({
       toast.success(`Folder renamed · ${activeDocument.folderId} → ${body.document.folderId}`);
       setFolderDraft(null);
       setSelectedDocumentId(newDocumentId);
-      router.push(`/review?doc=${encodeURIComponent(newDocumentId)}`);
+      router.push(`/workbench/review?doc=${encodeURIComponent(newDocumentId)}`);
       router.refresh();
     } catch (error) {
       toast.error("Could not rename folder", {
@@ -343,12 +344,12 @@ export function ReviewerWorkbench({
       setDeleteConfirmingForId(null);
       if (remaining.length === 0) {
         setSelectedDocumentId(null);
-        router.push("/review");
+        router.push("/workbench/review");
       } else {
         const nextIndex = Math.min(activeIndex, remaining.length - 1);
         const nextId = remaining[nextIndex].documentId;
         setSelectedDocumentId(nextId);
-        router.push(`/review?doc=${encodeURIComponent(nextId)}`);
+        router.push(`/workbench/review?doc=${encodeURIComponent(nextId)}`);
       }
       router.refresh();
     } catch (error) {
@@ -852,7 +853,7 @@ function SiblingsChip({
           return (
             <Link
               key={id}
-              href={`/review?doc=${encodeURIComponent(id)}`}
+              href={`/workbench/review?doc=${encodeURIComponent(id)}`}
               prefetch={false}
               aria-current={isActive ? "page" : undefined}
               className={
@@ -992,7 +993,7 @@ function SplitGroupPanel({
     });
   }
 
-  const validation = validateDrafts(drafts, group.totalPages);
+  const validation = checkSplitRules(drafts, group.totalPages);
 
   async function handleSave() {
     if (validation.errorMessage) {
@@ -1168,44 +1169,3 @@ function SplitGroupPanel({
   );
 }
 
-// Mirrors the server-side `validateContiguousSplits` so the UI can flag
-// problems before posting. Keep them in sync: any rule change here should be
-// reflected on the server (and tested there).
-function validateDrafts(
-  drafts: SplitDraft[],
-  totalPages: number,
-): { errorMessage?: string; perRow: Array<string | undefined> } {
-  const perRow: Array<string | undefined> = drafts.map(() => undefined);
-  if (drafts.length === 0) {
-    return { errorMessage: "Add at least one split.", perRow };
-  }
-  let cursor = 0;
-  let errorMessage: string | undefined;
-  drafts.forEach((draft, index) => {
-    if (!Number.isInteger(draft.startPage) || !Number.isInteger(draft.endPage)) {
-      perRow[index] = "Page numbers must be whole integers.";
-      errorMessage ??= perRow[index];
-      return;
-    }
-    if (draft.startPage !== cursor + 1) {
-      perRow[index] = `Must start at page ${cursor + 1}.`;
-      errorMessage ??= perRow[index];
-      return;
-    }
-    if (draft.endPage < draft.startPage) {
-      perRow[index] = "End page is before start page.";
-      errorMessage ??= perRow[index];
-      return;
-    }
-    if (draft.endPage > totalPages) {
-      perRow[index] = `Exceeds source page count (${totalPages}).`;
-      errorMessage ??= perRow[index];
-      return;
-    }
-    cursor = draft.endPage;
-  });
-  if (!errorMessage && cursor !== totalPages) {
-    errorMessage = `Splits cover pages 1\u2013${cursor}, but the source has ${totalPages} pages.`;
-  }
-  return { errorMessage, perRow };
-}

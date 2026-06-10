@@ -6,7 +6,7 @@ and Vercel Blob image URLs.
 
 Example (login node, after requesting a GPU in the same shell or via sbatch wrapper):
 
-  export EDISON_VERCEL_URL=https://edison-automation.vercel.app
+  export EDISON_VERCEL_URL=https://edison-papers-research.vercel.app
   export EDISON_OCR_WORKER_SECRET=your-shared-secret
   export EDISON_QWEN_MODEL_DIR=/scratch/$USER/edison/models/Qwen2.5-VL-7B-Instruct
 
@@ -34,12 +34,15 @@ from serve_qwen_ocr import QwenOcrRuntime, create_runtime  # noqa: E402
 from transcribe_qwen_vl import MODEL_LABEL, PROMPT_VERSION  # noqa: E402
 
 
+from app_config import APP_PRODUCTION_URL, get_vercel_url  # noqa: E402
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--vercel-url",
-        default=os.environ.get("EDISON_VERCEL_URL", "").strip(),
-        help="Edison base URL (defaults to EDISON_VERCEL_URL)",
+        default=get_vercel_url(),
+        help=f"Edison base URL (defaults to EDISON_VERCEL_URL or {APP_PRODUCTION_URL})",
     )
     parser.add_argument(
         "--worker-secret",

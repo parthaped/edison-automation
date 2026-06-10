@@ -1,9 +1,9 @@
 "use client";
 
-import { Archive, Download, FileCheck2, History, Upload } from "lucide-react";
+import { Archive, Download, FileCheck2, History, LogOut, Upload } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 
 interface NavItem {
@@ -16,25 +16,25 @@ interface NavItem {
 const navItems: NavItem[] = [
   {
     label: "Upload & transcribe",
-    href: "/upload",
+    href: "/workbench/upload",
     description: "Ingest pages and run OCR",
     icon: Upload,
   },
   {
     label: "Review",
-    href: "/review",
+    href: "/workbench/review",
     description: "Verify transcriptions",
     icon: FileCheck2,
   },
   {
     label: "Past verifications",
-    href: "/past",
+    href: "/workbench/past",
     description: "Approved transcriptions",
     icon: Archive,
   },
   {
     label: "Audit trail",
-    href: "/audit",
+    href: "/workbench/audit",
     description: "Processing history",
     icon: History,
   },
@@ -42,12 +42,19 @@ const navItems: NavItem[] = [
 
 export function WorkbenchSidebar() {
   const pathname = usePathname();
+  const router = useRouter();
+
+  async function handleLogout() {
+    await fetch("/api/auth/logout", { method: "POST" });
+    router.push("/workbench/login");
+    router.refresh();
+  }
 
   return (
     <aside className="flex h-full w-60 shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground">
       <div className="border-b border-sidebar-border">
         <Link
-          href="/review"
+          href="/workbench/review"
           className="flex items-center gap-2.5 px-4 py-3.5 transition-colors hover:bg-sidebar-accent"
         >
           <Image
@@ -64,7 +71,7 @@ export function WorkbenchSidebar() {
               Edison Papers
             </span>
             <span className="truncate text-[13.5px] font-semibold text-foreground">
-              Automation Workbench
+              Staff Workbench
             </span>
           </div>
         </Link>
@@ -136,6 +143,24 @@ export function WorkbenchSidebar() {
           />
           Download Omeka CSV
         </a>
+        <Link
+          href="/"
+          className="flex items-center gap-2 rounded-md px-2.5 py-2 text-[13px] font-medium text-sidebar-foreground transition-colors hover:bg-sidebar-accent"
+        >
+          Research platform
+        </Link>
+        <button
+          type="button"
+          onClick={() => void handleLogout()}
+          className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-[13px] font-medium text-sidebar-foreground transition-colors hover:bg-sidebar-accent"
+        >
+          <LogOut
+            className="h-4 w-4 shrink-0 text-muted-foreground"
+            strokeWidth={1.8}
+            aria-hidden="true"
+          />
+          Sign out
+        </button>
         <p className="px-2.5 pb-1 pt-2 text-[10px] uppercase tracking-wide text-muted-foreground">
           Rutgers University · Internal
         </p>

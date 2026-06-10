@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { Toaster } from "@/components/ui/sonner";
+import { APP_PRODUCTION_URL, APP_DISPLAY_NAME } from "@/lib/app-config";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -14,9 +15,13 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Edison Automation Workbench",
+  metadataBase: new URL(APP_PRODUCTION_URL),
+  title: {
+    default: APP_DISPLAY_NAME,
+    template: "%s · Edison Papers",
+  },
   description:
-    "Review, correct, and export Thomas Edison Papers AI transcriptions and indexing metadata.",
+    "Semantic search across Thomas A. Edison Papers — letters, lab notes, patents, and business records from edisondigital.rutgers.edu.",
   icons: {
     icon: [{ url: "/favicon.svg", type: "image/svg+xml" }],
   },

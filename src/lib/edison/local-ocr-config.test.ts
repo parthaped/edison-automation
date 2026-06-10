@@ -4,7 +4,6 @@ import {
   getLocalOcrUrl,
   isLocalOcrEnabled,
   isTranscriptionEnabled,
-  shouldUseGeminiForMetadata,
 } from "./local-ocr-config";
 
 describe("local-ocr-config", () => {
@@ -44,13 +43,5 @@ describe("local-ocr-config", () => {
   it("reads OCR secret", () => {
     vi.stubEnv("EDISON_LOCAL_OCR_SECRET", " shared-secret ");
     expect(getLocalOcrSecret()).toBe("shared-secret");
-  });
-
-  it("uses Gemini for metadata only when Gemini is configured", () => {
-    vi.stubEnv("EDISON_GEMINI_API_KEY", "");
-    expect(shouldUseGeminiForMetadata()).toBe(false);
-
-    vi.stubEnv("EDISON_GEMINI_API_KEY", "AIza_test");
-    expect(shouldUseGeminiForMetadata()).toBe(true);
   });
 });

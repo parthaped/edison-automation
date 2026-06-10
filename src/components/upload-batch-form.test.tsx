@@ -15,7 +15,7 @@ vi.mock("@vercel/blob/client", () => ({
 }));
 
 vi.mock("next/navigation", () => ({
-  usePathname: () => "/upload",
+  usePathname: () => "/workbench/upload",
   useRouter: () => ({
     push: vi.fn(),
     replace: vi.fn(),

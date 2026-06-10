@@ -62,7 +62,7 @@ module load cuda/12.1.0
 micromamba activate edison
 cd ~/edison-automation
 
-export EDISON_VERCEL_URL=https://edison-automation.vercel.app
+export EDISON_VERCEL_URL=https://edison-papers-research.vercel.app
 export EDISON_OCR_WORKER_SECRET='same-as-vercel'
 export EDISON_QWEN_MODEL_DIR=/scratch/$USER/edison/models/Qwen2.5-VL-7B-Instruct
 
@@ -78,7 +78,7 @@ On the **login node** (no GPU), use a `sbatch` wrapper that runs the worker on a
 ```bash
 sbatch --partition=gpu --gres=gpu:1 --cpus-per-task=8 --mem=32G --time=12:00:00 \
   --wrap='module load cuda/12.1.0 && source /scratch/$USER/micromamba/envs/edison/bin/activate && \
-  export EDISON_VERCEL_URL=https://edison-automation.vercel.app && \
+  export EDISON_VERCEL_URL=https://edison-papers-research.vercel.app && \
   export EDISON_OCR_WORKER_SECRET=... && \
   cd ~/edison-automation && python ml/scripts/amarel_ocr_worker.py --dtype bf16'
 ```

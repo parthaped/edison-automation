@@ -7,7 +7,7 @@ import { getRuntimeCapabilities } from "@/lib/edison/env";
 export const dynamic = "force-dynamic";
 
 export const metadata = {
-  title: "Upload & transcribe · Edison Automation Workbench",
+  title: "Upload & transcribe · Edison Papers Workbench",
 };
 
 export default function UploadPage() {

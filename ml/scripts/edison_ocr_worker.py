@@ -5,7 +5,7 @@ Default backend is PaddleOCR-VL-1.6 (laptop). Use --backend qwen for Qwen2.5-VL.
 
 Example:
 
-  export EDISON_VERCEL_URL=https://edison-automation.vercel.app
+  export EDISON_VERCEL_URL=https://edison-papers-research.vercel.app
   export EDISON_OCR_WORKER_SECRET=your-shared-secret
   python ml/scripts/edison_ocr_worker.py --backend paddleocr-vl --idle-sleep 10
 """
@@ -37,6 +37,9 @@ class OcrBackend(Protocol):
     def transcribe_image_paths(self, image_paths: list[Path]) -> list[str]: ...
 
 
+from app_config import APP_PRODUCTION_URL, get_vercel_url  # noqa: E402
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -46,8 +49,8 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--vercel-url",
-        default=os.environ.get("EDISON_VERCEL_URL", "").strip(),
-        help="Edison base URL (defaults to EDISON_VERCEL_URL)",
+        default=get_vercel_url(),
+        help=f"Edison base URL (defaults to EDISON_VERCEL_URL or {APP_PRODUCTION_URL})",
     )
     parser.add_argument(
         "--worker-secret",

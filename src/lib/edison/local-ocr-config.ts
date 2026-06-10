@@ -35,10 +35,3 @@ export function isTranscriptionEnabled(
     isLocalOcrEnabled(env)
   );
 }
-
-/** Post-transcribe document splitting via Gemini (text-only when local OCR was used). */
-export function shouldUseGeminiForMetadata(
-  env: NodeJS.ProcessEnv = process.env,
-): boolean {
-  return isGeminiConfigured(env);
-}

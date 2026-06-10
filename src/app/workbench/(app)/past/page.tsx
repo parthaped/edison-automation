@@ -10,7 +10,7 @@ import { getEdisonService } from "@/lib/edison/service-factory";
 import type { ConfidenceBucket } from "@/lib/edison/types";
 
 export const metadata: Metadata = {
-  title: "Past verifications · Edison Automation Workbench",
+  title: "Past verifications · Edison Papers Workbench",
 };
 
 interface PastPageProps {
@@ -80,7 +80,7 @@ export default async function PastPage({ searchParams }: PastPageProps) {
             </h2>
             <p className="mt-2 text-sm text-muted-foreground">
               Approve documents in the{" "}
-              <Link href="/review" className="underline">
+              <Link href="/workbench/review" className="underline">
                 Review
               </Link>{" "}
               tab to see them here.

@@ -20,7 +20,7 @@ export default function OperatorImageListsPage() {
           <li aria-hidden="true">/</li>
           <li>
             <Link
-              href="/upload"
+              href="/workbench/upload"
               className="hover:text-foreground hover:underline"
             >
               Upload
@@ -113,7 +113,7 @@ export default function OperatorImageListsPage() {
             <li>
               Drag the renamed images into the{" "}
               <Link
-                href="/upload"
+                href="/workbench/upload"
                 className="text-foreground underline hover:no-underline"
               >
                 upload form

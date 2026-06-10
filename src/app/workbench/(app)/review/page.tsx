@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { getEdisonService } from "@/lib/edison/service-factory";
 
 export const metadata: Metadata = {
-  title: "Review · Edison Automation Workbench",
+  title: "Review · Edison Papers Workbench",
 };
 
 interface ReviewPageProps {
@@ -77,7 +77,7 @@ export default async function ReviewPage({ searchParams }: ReviewPageProps) {
               </p>
               <Button
                 className="mt-5"
-                render={<Link href="/upload" />}
+                render={<Link href="/workbench/upload" />}
               >
                 Upload &amp; transcribe
               </Button>
@@ -123,7 +123,7 @@ function ReviewPagination({
             variant="outline"
             size="sm"
             render={
-              <Link href={`/review?offset=${prevOffset}${docQuery}`} />
+              <Link href={`/workbench/review?offset=${prevOffset}${docQuery}`} />
             }
           >
             Previous
@@ -137,7 +137,7 @@ function ReviewPagination({
             variant="outline"
             size="sm"
             render={
-              <Link href={`/review?offset=${nextOffset}${docQuery}`} />
+              <Link href={`/workbench/review?offset=${nextOffset}${docQuery}`} />
             }
           >
             Next
@@ -184,7 +184,7 @@ function ConfidenceCounts({
         </div>
       ))}
       <Link
-        href="/past"
+        href="/workbench/past"
         className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-2.5 py-1 text-[11px] uppercase tracking-wide text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
       >
         <span aria-hidden="true" className="inline-block h-1.5 w-1.5 rounded-full bg-sky-500" />

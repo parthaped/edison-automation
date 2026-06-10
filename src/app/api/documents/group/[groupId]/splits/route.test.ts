@@ -137,7 +137,7 @@ describe("/api/documents/group/[groupId]/splits", () => {
 
     expect(response.status).toBe(400);
     const body = (await response.json()) as { error: { message: string } };
-    expect(body.error.message).toMatch(/must start at page 3/);
+    expect(body.error.message).toMatch(/Must start at page 3/);
   });
 
   it("rejects malformed payloads with a 400", async () => {

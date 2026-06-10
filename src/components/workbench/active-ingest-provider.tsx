@@ -94,7 +94,7 @@ export function ActiveIngestProvider({ children }: { children: ReactNode }) {
     status === "uploading" ||
     status === "finalizing" ||
     status === "processing";
-  const reviewHref = result ? reviewTarget(result) : "/review";
+  const reviewHref = result ? reviewTarget(result) : "/workbench/review";
 
   const cancelAutoRedirect = useCallback(() => {
     if (redirectTimerRef.current) {
@@ -122,7 +122,7 @@ export function ActiveIngestProvider({ children }: { children: ReactNode }) {
       cancelAutoRedirect();
       redirectTimerRef.current = setTimeout(() => {
         redirectTimerRef.current = null;
-        if (pathnameRef.current === "/review") {
+        if (pathnameRef.current === "/workbench/review") {
           router.refresh();
         } else {
           router.push(reviewTarget(completedResult));
@@ -815,7 +815,7 @@ function reviewTarget(ingestResult: ManualIngestResult): string {
     (pkg) => pkg.status === "needs_review",
   );
   const target = firstReviewable ?? ingestResult.packages[0];
-  return target ? `/review?doc=${encodeURIComponent(target.documentId)}` : "/review";
+  return target ? `/workbench/review?doc=${encodeURIComponent(target.documentId)}` : "/workbench/review";
 }
 
 function readStoredBatchId(): string | null {

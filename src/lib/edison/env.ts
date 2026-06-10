@@ -17,6 +17,11 @@ const envSchema = z.object({
   EDISON_GCP_PROJECT_ID: z.string().optional(),
   EDISON_GCP_LOCATION: z.string().optional(),
   EDISON_OCR_MODEL: z.string().optional(),
+  WORKBENCH_DEV_USERNAME: z.string().optional(),
+  WORKBENCH_DEV_PASSWORD: z.string().optional(),
+  WORKBENCH_SESSION_SECRET: z.string().optional(),
+  SEARCH_AI_EXPANSION_ENABLED: z.string().optional(),
+  CRON_SECRET: z.string().optional(),
 });
 
 export type AppEnv = z.infer<typeof envSchema>;

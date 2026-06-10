@@ -1,6 +1,6 @@
 # Architecture
 
-![Edison Automation pipeline architecture](images/architecture.png)
+![Edison Papers Research Platform pipeline architecture](images/architecture.png)
 
 The diagram is generated from [`images/architecture.svg`](images/architecture.svg). To regenerate the PNG after editing the SVG, run `node scripts/render-architecture-png.mjs` from the repository root.
 

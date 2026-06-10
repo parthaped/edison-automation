@@ -111,14 +111,23 @@ export interface EdisonRepository {
 export function summarizeDocuments(
   documents: DocumentPackage[],
 ): DashboardSummary {
-  return {
-    total: documents.length,
-    highConfidence: documents.filter((document) => document.confidence === "high").length,
-    lowConfidence: documents.filter((document) => document.confidence === "low").length,
-    mediumConfidence: documents.filter((document) => document.confidence === "medium").length,
-    blocked: documents.filter((document) => document.status === "blocked").length,
-    readyToExport: documents.filter((document) => document.status === "approved").length,
+  const acc = {
+    total: 0,
+    highConfidence: 0,
+    lowConfidence: 0,
+    mediumConfidence: 0,
+    blocked: 0,
+    readyToExport: 0,
   };
+  for (const doc of documents) {
+    acc.total++;
+    if (doc.confidence === "high") acc.highConfidence++;
+    else if (doc.confidence === "low") acc.lowConfidence++;
+    else if (doc.confidence === "medium") acc.mediumConfidence++;
+    if (doc.status === "blocked") acc.blocked++;
+    else if (doc.status === "approved") acc.readyToExport++;
+  }
+  return acc;
 }
 
 export function emptyTranscription(documentId: string): TranscriptionRun {

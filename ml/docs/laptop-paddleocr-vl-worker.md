@@ -50,7 +50,7 @@ Creates `ml\.venv-paddle-vl` with PaddlePaddle GPU + `paddleocr[doc-parser]`.
 Set env vars (or pass via script params):
 
 ```powershell
-$env:EDISON_VERCEL_URL = "https://your-app.vercel.app"
+$env:EDISON_VERCEL_URL = "https://edison-papers-research.vercel.app"
 $env:EDISON_OCR_WORKER_SECRET = "your-shared-secret"
 .\ml\scripts\start_edison_worker.ps1
 ```
@@ -94,7 +94,7 @@ python ml/scripts/compare_ocr_to_gemini.py --pdf "C:\path\to\file.pdf" --predict
 |---------|-----|
 | HTTP 401 Unauthorized | `EDISON_OCR_WORKER_SECRET` on the laptop must **exactly** match Vercel. No extra quotes in the Vercel UI. Redeploy after changing env vars. |
 | HTTP 503 from `/api/ocr/worker/next` | Set `EDISON_OCR_QUEUE_ENABLED=true` and `EDISON_OCR_WORKER_SECRET` on Vercel, then redeploy. |
-| Worker gets no jobs | Confirm `EDISON_OCR_QUEUE_ENABLED=true` on Vercel and check [`/api/health`](https://edison-automation.vercel.app/api/health): `ocrQueue` and `ocrWorkerSecretConfigured` should be `"configured"` / `true`. |
+| Worker gets no jobs | Confirm `EDISON_OCR_QUEUE_ENABLED=true` on Vercel and check [`/api/health`](https://edison-papers-research.vercel.app/api/health): `ocrQueue` and `ocrWorkerSecretConfigured` should be `"configured"` / `true`. |
 | Workflow times out | Raise `EDISON_OCR_QUEUE_TIMEOUT_MS`; ensure worker is running |
 | GPU OOM on laptop | Use `--device cpu` or process one job at a time |
 | CUDNN warning | Paddle may warn about CUDNN version mismatch; usually still runs |
@@ -104,7 +104,7 @@ python ml/scripts/compare_ocr_to_gemini.py --pdf "C:\path\to\file.pdf" --predict
 Verify auth before starting the worker:
 
 ```powershell
-$env:EDISON_VERCEL_URL = "https://edison-automation.vercel.app"
+$env:EDISON_VERCEL_URL = "https://edison-papers-research.vercel.app"
 $env:EDISON_OCR_WORKER_SECRET = "your-shared-secret"
 ml\.venv-paddle-vl\Scripts\python.exe ml\scripts\test_ocr_worker_auth.py
 ```

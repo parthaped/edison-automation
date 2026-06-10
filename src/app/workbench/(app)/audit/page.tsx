@@ -4,7 +4,7 @@ import { ContentHeader } from "@/components/workbench/content-header";
 import { getEdisonService } from "@/lib/edison/service-factory";
 
 export const metadata: Metadata = {
-  title: "Audit trail · Edison Automation Workbench",
+  title: "Audit trail · Edison Papers Workbench",
 };
 
 export default async function AuditPage() {

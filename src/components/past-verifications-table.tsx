@@ -93,7 +93,7 @@ export function PastVerificationsTable({
         </h2>
         <p className="mt-2 text-sm text-muted-foreground">
           Documents you approve in{" "}
-          <Link href="/review" className="underline">
+          <Link href="/workbench/review" className="underline">
             Review
           </Link>{" "}
           will appear here ready for download.
@@ -274,7 +274,7 @@ function Pagination({
           <Button
             variant="outline"
             size="sm"
-            render={<Link href={`/past?offset=${prevOffset}`} />}
+            render={<Link href={`/workbench/past?offset=${prevOffset}`} />}
           >
             Previous
           </Button>
@@ -286,7 +286,7 @@ function Pagination({
           <Button
             variant="outline"
             size="sm"
-            render={<Link href={`/past?offset=${nextOffset}`} />}
+            render={<Link href={`/workbench/past?offset=${nextOffset}`} />}
           >
             Next
           </Button>

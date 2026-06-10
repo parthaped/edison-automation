@@ -26,8 +26,8 @@ from typing import Any
 
 BASE_URL = "https://edisondigital.rutgers.edu"
 DEFAULT_USER_AGENT = (
-    "Mozilla/5.0 (compatible; edison-automation-iiif-harvester/0.1; "
-    "+https://github.com/parthaped/edison-automation)"
+    "Mozilla/5.0 (compatible; edison-papers-research-iiif-harvester/0.1; "
+    "+https://edison-papers-research.vercel.app)"
 )
 TRANSCRIPT_LABELS = {
     "abstract",

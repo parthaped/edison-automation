@@ -138,7 +138,7 @@ Ingest transcription is **not** Kraken or Gemini vision. Vercel rasterizes uploa
 ```powershell
 # Laptop worker (see ml/docs/laptop-paddleocr-vl-worker.md)
 .\ml\scripts\setup_paddleocr_vl.ps1
-$env:EDISON_VERCEL_URL = "https://your-app.vercel.app"
+$env:EDISON_VERCEL_URL = "https://edison-papers-research.vercel.app"
 $env:EDISON_OCR_WORKER_SECRET = "shared-secret"
 .\ml\scripts\start_edison_worker.ps1
 ```

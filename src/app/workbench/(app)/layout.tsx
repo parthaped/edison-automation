@@ -2,11 +2,7 @@ import type { ReactNode } from "react";
 import { ActiveIngestProvider } from "@/components/workbench/active-ingest-provider";
 import { WorkbenchSidebar } from "@/components/workbench/sidebar";
 
-export default function WorkbenchLayout({
-  children,
-}: {
-  children: ReactNode;
-}) {
+export default function WorkbenchAppLayout({ children }: { children: ReactNode }) {
   return (
     <ActiveIngestProvider>
       <div className="flex h-[100svh] w-full overflow-hidden bg-background">

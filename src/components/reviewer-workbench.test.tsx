@@ -207,7 +207,7 @@ describe("ReviewerWorkbench", () => {
       "/api/documents/E2002AAA",
       expect.objectContaining({ method: "DELETE" }),
     );
-    expect(routerMocks.push).toHaveBeenCalledWith("/review");
+    expect(routerMocks.push).toHaveBeenCalledWith("/workbench/review");
     expect(routerMocks.refresh).toHaveBeenCalled();
   });
 
@@ -232,7 +232,7 @@ describe("ReviewerWorkbench", () => {
     await user.click(screen.getByRole("button", { name: /^next$/i }));
 
     expect(routerMocks.push).toHaveBeenCalledWith(
-      "/review?doc=DOC-B",
+      "/workbench/review?doc=DOC-B",
     );
   });
 
@@ -279,7 +279,7 @@ describe("ReviewerWorkbench", () => {
       "/api/documents/DOC-A",
       expect.objectContaining({ method: "PATCH" }),
     );
-    expect(routerMocks.push).toHaveBeenCalledWith("/review?doc=DOC-B");
+    expect(routerMocks.push).toHaveBeenCalledWith("/workbench/review?doc=DOC-B");
     expect(routerMocks.refresh).toHaveBeenCalled();
   });
 });

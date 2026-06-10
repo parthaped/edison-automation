@@ -33,17 +33,3 @@ export function getOcrQueueTimeoutMs(
     ? Math.floor(raw)
     : 2 * 60 * 60 * 1000;
 }
-
-export function getEdisonPublicBaseUrl(
-  env: NodeJS.ProcessEnv = process.env,
-): string {
-  const explicit = env.EDISON_PUBLIC_URL?.trim();
-  if (explicit) {
-    return explicit.replace(/\/$/, "");
-  }
-  const vercel = env.VERCEL_URL?.trim();
-  if (vercel) {
-    return `https://${vercel.replace(/^https?:\/\//, "")}`;
-  }
-  return "http://localhost:3000";
-}

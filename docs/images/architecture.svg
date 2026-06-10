@@ -84,7 +84,7 @@
   <rect x="0" y="0" width="1600" height="1700" fill="url(#bg)"/>
 
   <!-- Header -->
-  <text x="60" y="58" class="title" font-size="30">Edison Automation Workbench &#8212; Pipeline Architecture</text>
+  <text x="60" y="58" class="title" font-size="30">Edison Papers Research Platform &#8212; Pipeline Architecture</text>
   <text x="60" y="86" class="subtitle" font-size="15">Box / manual ingest &#8594; user-gated start &#8594; file-type-routed OCR/HTR &#8594; confidence-routed review &#8594; feedback loop &#8594; Omeka export</text>
 
   <!-- Throughput badge -->

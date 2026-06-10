@@ -7,15 +7,23 @@ import argparse
 import json
 import os
 import sys
+from pathlib import Path
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+from app_config import APP_PRODUCTION_URL, get_vercel_url  # noqa: E402
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--vercel-url",
-        default=os.environ.get("EDISON_VERCEL_URL", "").strip(),
+        default=get_vercel_url(),
+        help=f"Edison base URL (defaults to EDISON_VERCEL_URL or {APP_PRODUCTION_URL})",
     )
     parser.add_argument(
         "--worker-secret",

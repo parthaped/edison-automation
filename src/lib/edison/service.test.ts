@@ -718,7 +718,7 @@ describe("validateContiguousSplits", () => {
         ],
         7,
       ),
-    ).toThrow(/must start at page 4/);
+    ).toThrow(/Must start at page 4/);
   });
 
   it("rejects an overlap between splits", () => {
@@ -730,7 +730,7 @@ describe("validateContiguousSplits", () => {
         ],
         7,
       ),
-    ).toThrow(/must start at page 5/);
+    ).toThrow(/Must start at page 5/);
   });
 
   it("rejects splits that do not cover the final page", () => {
@@ -742,13 +742,13 @@ describe("validateContiguousSplits", () => {
         ],
         7,
       ),
-    ).toThrow(/last split ends at 5/);
+    ).toThrow(/source has 7 pages/);
   });
 
   it("rejects an endPage beyond the source page count", () => {
     expect(() =>
       validateContiguousSplits([{ startPage: 1, endPage: 9 }], 5),
-    ).toThrow(/beyond the source's 5 pages/);
+    ).toThrow(/source page count/);
   });
 });
 

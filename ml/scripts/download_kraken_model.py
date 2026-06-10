@@ -30,7 +30,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    request = urllib.request.Request(args.url, headers={"User-Agent": "edison-automation/0.1"})
+    request = urllib.request.Request(args.url, headers={"User-Agent": "edison-papers-research/0.1"})
     with urllib.request.urlopen(request, timeout=300) as response:
         payload = response.read()
     args.output.write_bytes(payload)
