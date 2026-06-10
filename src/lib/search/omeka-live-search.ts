@@ -1,4 +1,5 @@
 import {
+  getFirstValue,
   itemToDocumentFields,
   searchOmekaItemsPage,
   type OmekaSearchFilters,
@@ -74,6 +75,8 @@ function collectMatchedTerms(
 
 function itemSearchableText(item: OmekaItem): string {
   const fields = itemToDocumentFields(item);
+  const transcription =
+    getFirstValue(item["scripto:transcription"]) || fields.transcriptionPreview;
   return [
     fields.title,
     fields.description,
@@ -83,7 +86,7 @@ function itemSearchableText(item: OmekaItem): string {
     fields.identifier,
     fields.isPartOf,
     ...fields.subjects,
-    fields.transcriptionPreview,
+    transcription,
   ]
     .filter(Boolean)
     .join(" ");

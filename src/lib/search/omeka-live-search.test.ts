@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { buildOmekaSearchParams } from "@/lib/omeka/client";
+import { buildOmekaSearchParams, searchOmekaItemsPage } from "@/lib/omeka/client";
 import { searchOmekaLive } from "./omeka-live-search";
 
 describe("buildOmekaSearchParams", () => {
@@ -79,5 +79,29 @@ describe("searchOmekaLive", () => {
     expect(response.results[0]?.snippet.toLowerCase()).toContain("electric");
     expect(response.expandedTerms.length).toBeGreaterThan(0);
     expect(response.indexBuiltAt).toBeNull();
+  });
+});
+
+describe("searchOmekaItemsPage", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("reads Omeka-S-Total-Results for pagination", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        return new Response(JSON.stringify([]), {
+          status: 200,
+          headers: { "Omeka-S-Total-Results": "33500" },
+        });
+      }),
+    );
+
+    const page = await searchOmekaItemsPage("electric light", { page: 2, perPage: 20 });
+
+    expect(page.totalResults).toBe(33500);
+    expect(page.page).toBe(2);
+    expect(page.perPage).toBe(20);
   });
 });

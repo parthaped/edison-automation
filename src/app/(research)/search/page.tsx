@@ -200,15 +200,11 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
 
         <h1 className="text-lg font-semibold sm:text-xl">{heading}</h1>
 
-        {query ? (
+        <Badge variant="secondary" className="gap-1">
 
-          <Badge variant="secondary" className="gap-1">
+          Live catalog
 
-            Live catalog
-
-          </Badge>
-
-        ) : null}
+        </Badge>
 
       </div>
 
