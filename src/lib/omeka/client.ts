@@ -46,9 +46,144 @@ export function extractSearchableText(item: OmekaItem): string {
   return parts.filter(Boolean).join(" ");
 }
 
+const OMEKA_SEARCH_TIMEOUT_MS = 25_000;
+
+export interface OmekaSearchFilters {
+  documentType?: string;
+  collection?: string;
+  author?: string;
+  recipient?: string;
+  subject?: string;
+  place?: string;
+  identifier?: string;
+  yearFrom?: number;
+  yearTo?: number;
+}
+
+function appendPropertyFilter(
+  params: Record<string, string>,
+  index: number,
+  property: string,
+  type: string,
+  text: string,
+): number {
+  params[`property[${index}][joiner]`] = "and";
+  params[`property[${index}][property]`] = property;
+  params[`property[${index}][type]`] = type;
+  params[`property[${index}][text]`] = text;
+  return index + 1;
+}
+
+export function buildOmekaSearchParams(
+  query: string,
+  options: {
+    page?: number;
+    perPage?: number;
+    filters?: OmekaSearchFilters;
+    useFulltext?: boolean;
+  } = {},
+): Record<string, string> {
+  const params: Record<string, string> = {
+    page: String(options.page ?? 1),
+    per_page: String(options.perPage ?? 25),
+  };
+
+  if (options.useFulltext !== false && query.trim()) {
+    params.fulltext_search = query.trim();
+  }
+
+  const filters = options.filters ?? {};
+  let propertyIndex = 0;
+
+  if (filters.documentType) {
+    propertyIndex = appendPropertyFilter(
+      params,
+      propertyIndex,
+      "dcterms:type",
+      "in",
+      filters.documentType,
+    );
+  }
+  if (filters.collection) {
+    propertyIndex = appendPropertyFilter(
+      params,
+      propertyIndex,
+      "dcterms:isPartOf",
+      "in",
+      filters.collection,
+    );
+  }
+  if (filters.author) {
+    propertyIndex = appendPropertyFilter(
+      params,
+      propertyIndex,
+      "dcterms:creator",
+      "in",
+      filters.author,
+    );
+  }
+  if (filters.recipient) {
+    propertyIndex = appendPropertyFilter(
+      params,
+      propertyIndex,
+      "bibo:recipient",
+      "in",
+      filters.recipient,
+    );
+  }
+  if (filters.subject) {
+    propertyIndex = appendPropertyFilter(
+      params,
+      propertyIndex,
+      "dcterms:subject",
+      "in",
+      filters.subject,
+    );
+  }
+  if (filters.place) {
+    propertyIndex = appendPropertyFilter(
+      params,
+      propertyIndex,
+      "dcterms:coverage",
+      "in",
+      filters.place,
+    );
+  }
+  if (filters.identifier) {
+    propertyIndex = appendPropertyFilter(
+      params,
+      propertyIndex,
+      "dcterms:identifier",
+      "eq",
+      filters.identifier,
+    );
+  }
+  if (filters.yearFrom !== undefined) {
+    propertyIndex = appendPropertyFilter(
+      params,
+      propertyIndex,
+      "dcterms:date",
+      "gte",
+      String(filters.yearFrom),
+    );
+  }
+  if (filters.yearTo !== undefined) {
+    appendPropertyFilter(
+      params,
+      propertyIndex,
+      "dcterms:date",
+      "lte",
+      String(filters.yearTo),
+    );
+  }
+
+  return params;
+}
+
 export async function fetchOmekaJson<T>(
   path: string,
   params?: Record<string, string>,
+  fetchOptions?: { signal?: AbortSignal },
 ): Promise<T> {
   const baseUrl = getOmekaApiBaseUrl();
   const url = new URL(`${baseUrl}${path.startsWith("/") ? path : `/${path}`}`);
@@ -64,6 +199,7 @@ export async function fetchOmekaJson<T>(
       "User-Agent": USER_AGENT,
     },
     next: { revalidate: 300 },
+    signal: fetchOptions?.signal,
   });
 
   if (!response.ok) {
@@ -71,6 +207,56 @@ export async function fetchOmekaJson<T>(
   }
 
   return (await response.json()) as T;
+}
+
+export interface OmekaItemsPageResult {
+  items: OmekaItem[];
+  totalResults: number;
+  page: number;
+  perPage: number;
+}
+
+export async function searchOmekaItemsPage(
+  query: string,
+  options: {
+    page?: number;
+    perPage?: number;
+    filters?: OmekaSearchFilters;
+    useFulltext?: boolean;
+  } = {},
+): Promise<OmekaItemsPageResult> {
+  const page = options.page ?? 1;
+  const perPage = options.perPage ?? 25;
+  const params = buildOmekaSearchParams(query, { ...options, page, perPage });
+  const baseUrl = getOmekaApiBaseUrl();
+  const url = new URL(`${baseUrl}/items`);
+  for (const [key, value] of Object.entries(params)) {
+    url.searchParams.set(key, value);
+  }
+
+  const response = await fetch(url.toString(), {
+    headers: {
+      Accept: "application/json, application/ld+json;q=0.9, */*;q=0.1",
+      "User-Agent": USER_AGENT,
+    },
+    cache: "no-store",
+    signal: AbortSignal.timeout(OMEKA_SEARCH_TIMEOUT_MS),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Omeka API error ${response.status} for /items`);
+  }
+
+  const totalHeader = response.headers.get("Omeka-S-Total-Results");
+  const totalResults = totalHeader ? Number(totalHeader) : 0;
+  const items = (await response.json()) as OmekaItem[];
+
+  return {
+    items,
+    totalResults: Number.isFinite(totalResults) ? totalResults : items.length,
+    page,
+    perPage,
+  };
 }
 
 export async function searchOmekaItems(

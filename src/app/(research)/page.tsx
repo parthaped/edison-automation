@@ -26,9 +26,9 @@ const features = [
   },
   {
     icon: Layers,
-    title: "Pre-built Omeka S index",
+    title: "Live Omeka S catalog",
     description:
-      "Results come from a fast local index of edisondigital.rutgers.edu metadata — titles, Dublin Core fields, transcriptions, collections, and document types.",
+      "Results come directly from edisondigital.rutgers.edu — titles, Dublin Core fields, transcriptions, collections, and document types.",
   },
   {
     icon: FileSearch,
@@ -107,7 +107,7 @@ export default function ResearchHomePage() {
       <section className="border-t border-border">
         <div className="mx-auto flex max-w-6xl flex-col items-start justify-between gap-4 px-4 py-8 sm:flex-row sm:items-center sm:px-6">
           <p className="max-w-xl text-sm text-muted-foreground">
-            Searches a pre-built index of the Omeka S catalog at{" "}
+            Searches the live Omeka S catalog at{" "}
             <span className="text-foreground/70">edisondigital.rutgers.edu</span>.
             Staff tools are available in the secured Workbench.
           </p>

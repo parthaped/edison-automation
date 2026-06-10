@@ -54,23 +54,20 @@ npm run typecheck
 npm test
 ```
 
-## Search index build
+## Search
 
-Research search reads a **pre-built index** from Vercel Blob (with a local fallback in `ml/data/search/`). The index is not rebuilt on every deploy.
+Research search queries the **live Omeka S catalog** at [edisondigital.rutgers.edu](https://edisondigital.rutgers.edu) — no pre-built index or Vercel Blob upload is required for search to work.
 
-First-time setup (requires `BLOB_READ_WRITE_TOKEN` from `vercel env pull .env.local`):
+Keyword queries use Omeka fulltext search with local synonym expansion (`SEARCH_AI_EXPANSION_ENABLED` defaults off). Advanced filters map to Omeka Dublin Core property queries.
+
+Optional offline tooling (not required for production search):
 
 ```bash
-# Harvest Omeka S + build MiniSearch + upload to Blob
-npm run search:build
-
-# Local-only rebuild (no upload)
+# Harvest Omeka S into a local MiniSearch index (optional benchmarking / offline use)
 npm run search:build:local
 ```
 
-The harvester paginates all public items from edisondigital.rutgers.edu, aggregates Scripto transcriptions, and emits JSONL + MiniSearch artifacts. A weekly Vercel cron hits `/api/search/rebuild` to refresh the in-memory cache; run `npm run search:build` locally when the catalog changes materially.
-
-**Gemini RPD:** search uses local synonym expansion only (`SEARCH_AI_EXPANSION_ENABLED` defaults off). Gemini quota is reserved for workbench PaddleOCR-VL formatting.
+**Gemini RPD:** search uses local synonym expansion only. Gemini quota is reserved for workbench PaddleOCR-VL formatting.
 
 ## Key Routes
 
@@ -96,8 +93,8 @@ Dev credentials (override via `WORKBENCH_DEV_USERNAME` / `WORKBENCH_DEV_PASSWORD
 ### API
 
 - `/api/health` — deployment health check (`service: edison-papers-research`)
-- `/api/search` — context-aware search over the pre-built Omeka S index (keywords + advanced filters)
-- `/api/search/rebuild` — refresh index cache (cron / staff auth); full rebuild runs locally via `npm run search:build`
+- `/api/search` — context-aware search over the live edisondigital.rutgers.edu Omeka S catalog (keywords + advanced filters)
+- `/api/search/rebuild` — legacy index cache refresh (cron / staff auth); research search no longer requires a pre-built index
 - `/api/ingest/manual` — multipart manual file ingest (protected)
 - `/api/export/transcriptions` — CSV export for approved transcriptions (protected)
 - `/api/ocr/worker/*` — OCR pull queue for laptop/Amarel workers

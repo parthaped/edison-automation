@@ -1,8 +1,7 @@
 import type { SearchResponse } from "@/lib/omeka/types";
-import { getSearchIndex } from "./index-store";
-import { searchIndex } from "./index-search";
 import type { SearchFilterParams } from "./index-types";
 import { hasSearchCriteria, parseSearchFilterParams } from "./search-filters";
+import { searchOmekaLive } from "./omeka-live-search";
 
 export interface SemanticSearchOptions extends SearchFilterParams {
   page?: number;
@@ -50,26 +49,5 @@ export async function semanticSearch(
     };
   }
 
-  const loaded = await getSearchIndex();
-  const output = searchIndex({
-    miniSearch: loaded.miniSearch,
-    allRecords: loaded.allRecords,
-    manifest: loaded.manifest,
-    filters,
-    page,
-    perPage,
-  });
-
-  return {
-    query: filters.query ?? "",
-    expandedTerms: output.expandedTerms,
-    totalResults: output.totalResults,
-    page,
-    perPage,
-    results: output.results,
-    facets: output.facets,
-    searchMode: "keyword",
-    indexBuiltAt: loaded.manifest.builtAt,
-    manifestFacets: loaded.manifest.facets,
-  };
+  return searchOmekaLive({ ...options, page, perPage });
 }
