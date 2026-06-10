@@ -58,10 +58,10 @@ export function WorkbenchSidebar() {
           className="flex items-center gap-2.5 px-4 py-3.5 transition-colors hover:bg-sidebar-accent"
         >
           <Image
-            src="/favicon.svg"
+            src="/workbench-icon.svg"
             alt=""
             width={18}
-            height={24}
+            height={18}
             priority
             aria-hidden="true"
             className="shrink-0"
@@ -75,7 +75,7 @@ export function WorkbenchSidebar() {
             </span>
           </div>
         </Link>
-        <div className="h-px w-full bg-amber-500/80" aria-hidden="true" />
+        <div className="h-px w-full bg-[var(--brand-accent)]" aria-hidden="true" />
       </div>
 
       <nav aria-label="Primary" className="flex-1 overflow-y-auto p-2">

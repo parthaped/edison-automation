@@ -49,10 +49,10 @@ export default function WorkbenchLoginForm() {
       <header className="border-b border-border bg-white px-4 py-4 sm:px-6">
         <Link href="/" className="inline-flex items-center gap-2.5">
           <Image
-            src="/favicon.svg"
+            src="/workbench-icon.svg"
             alt=""
             width={18}
-            height={24}
+            height={18}
             priority
             aria-hidden="true"
           />

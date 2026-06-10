@@ -12,7 +12,16 @@ export default function ResearchLayout({ children }: { children: ReactNode }) {
             Thomas A. Edison Papers · Rutgers, The State University of New Jersey
           </p>
           <p>
-            Search powered by{" "}
+            Images from{" "}
+            <a
+              href="https://edison.rutgers.edu"
+              className="text-primary hover:underline"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              edison.rutgers.edu
+            </a>
+            . Search powered by{" "}
             <a
               href="https://edisondigital.rutgers.edu"
               className="text-primary hover:underline"

@@ -81,7 +81,7 @@ export function ResearchHeader() {
           })}
         </nav>
       </div>
-      <div className="h-px w-full bg-amber-500/80" aria-hidden="true" />
+      <div className="h-px w-full bg-[var(--brand-accent)]" aria-hidden="true" />
     </header>
   );
 }

@@ -58,6 +58,7 @@ input {
 }
 
 :root {
+  --brand-accent: #cc0033;
   /* Flat institutional palette: white surfaces, slate text, navy as the
    * single brand color. Amber survives only as an intentional Edison
    * archival accent on uncertainty surfaces. */

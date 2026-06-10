@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { ArrowRight, FileSearch, Layers, Sparkles } from "lucide-react";
+import { LandingExploreGrid } from "@/components/research/landing-explore-grid";
 import { SearchBar } from "@/components/research/search-bar";
 
 export const metadata: Metadata = {
@@ -82,7 +83,18 @@ export default function ResearchHomePage() {
         </div>
       </section>
 
-      <section className="mx-auto max-w-6xl px-4 py-12 sm:px-6 sm:py-16">
+      <LandingExploreGrid />
+
+      <section className="mx-auto max-w-6xl px-4 pb-12 sm:px-6 sm:pb-16">
+        <div className="mb-8 max-w-2xl">
+          <h2 className="text-2xl font-bold tracking-tight text-foreground sm:text-3xl">
+            How search works
+          </h2>
+          <p className="mt-2 text-sm leading-relaxed text-muted-foreground sm:text-base">
+            Semantic search across the live Edison Digital catalog — find documents
+            by meaning, not just exact words.
+          </p>
+        </div>
         <div className="grid gap-5 md:grid-cols-3">
           {features.map((feature) => {
             const Icon = feature.icon;
