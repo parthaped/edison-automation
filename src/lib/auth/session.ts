@@ -13,9 +13,6 @@ function base64UrlEncode(value: string): string {
     .toString("base64url");
 }
 
-function base64UrlDecode(value: string): string {
-  return Buffer.from(value, "base64url").toString("utf8");
-}
 
 function signPayload(payload: string, secret: string): string {
   return createHmac("sha256", secret).update(payload).digest("base64url");

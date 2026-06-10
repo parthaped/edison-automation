@@ -171,7 +171,7 @@ describe("ReviewerWorkbench", () => {
       />,
     );
 
-    const link = screen.getByRole("link", { name: /open standalone/i });
+    const link = screen.getByRole("button", { name: /open standalone/i });
     expect(link).toHaveAttribute("href", "/viewer/E2002AAA");
   });
 

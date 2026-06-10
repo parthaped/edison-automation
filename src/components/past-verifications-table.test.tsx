@@ -65,7 +65,7 @@ describe("PastVerificationsTable", () => {
         hasMore={false}
       />,
     );
-    const csvLink = screen.getByRole("link", { name: /^csv$/i });
+    const csvLink = screen.getByRole("button", { name: /^csv$/i });
     expect(csvLink).toHaveAttribute(
       "href",
       "/api/export/transcriptions/E2002AAA",
