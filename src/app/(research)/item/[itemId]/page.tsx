@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { IiifViewer } from "@/components/research/iiif-viewer";
 import {
   fetchOmekaItem,
   getFirstValue,
@@ -72,24 +73,32 @@ export default async function ItemPage({ params }: ItemPageProps) {
       </Link>
 
       <article className="mt-6 rounded-lg border border-border bg-white p-6 sm:p-8">
-        <div className="flex flex-col gap-6 sm:flex-row">
-          {fields.thumbnailUrl ? (
-            <div className="shrink-0">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={fields.thumbnailUrl}
-                alt=""
-                className="mx-auto max-h-64 rounded border border-border object-contain sm:max-w-xs"
-              />
-            </div>
-          ) : null}
+        <h1 className="text-2xl font-semibold leading-tight text-foreground sm:text-3xl">
+          {fields.title}
+        </h1>
 
-          <div className="min-w-0 flex-1">
-            <h1 className="text-2xl font-semibold leading-tight text-foreground sm:text-3xl">
-              {fields.title}
-            </h1>
+        {fields.iiifManifestUrl ? (
+          <section className="mt-6">
+            <IiifViewer
+              manifestUrl={fields.iiifManifestUrl}
+              thumbnailUrl={fields.thumbnailUrl}
+              edisonDigitalUrl={publicUrl}
+              title="Document pages"
+            />
+          </section>
+        ) : fields.thumbnailUrl ? (
+          <div className="mt-6">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={fields.thumbnailUrl}
+              alt=""
+              className="mx-auto max-h-64 rounded border border-border object-contain"
+            />
+          </div>
+        ) : null}
 
-            <dl className="mt-5 grid gap-3 text-sm sm:grid-cols-2">
+        <div className="mt-6 min-w-0">
+            <dl className="grid gap-3 text-sm sm:grid-cols-2">
               {fields.creator ? (
                 <div>
                   <dt className="inline-flex items-center gap-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
@@ -170,7 +179,6 @@ export default async function ItemPage({ params }: ItemPageProps) {
               </Button>
             </div>
           </div>
-        </div>
 
         {description ? (
           <section className="mt-8 border-t border-border pt-6">
@@ -193,7 +201,9 @@ export default async function ItemPage({ params }: ItemPageProps) {
               {transcription.length > 3000 ? "…" : ""}
             </div>
             <p className="mt-2 text-xs text-muted-foreground">
-              Full transcription and page images are available on edisondigital.rutgers.edu.
+              {fields.iiifManifestUrl
+                ? "Full transcription and additional images are available on edisondigital.rutgers.edu."
+                : "Full transcription and page images are available on edisondigital.rutgers.edu."}
             </p>
           </section>
         ) : null}

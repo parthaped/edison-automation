@@ -77,6 +77,7 @@ export interface SearchResultDocument {
   subjects: string[];
   thumbnailUrl: string | null;
   edisonDigitalUrl: string;
+  iiifManifestUrl?: string | null;
   snippet: string;
   relevanceScore: number;
   matchedTerms: string[];

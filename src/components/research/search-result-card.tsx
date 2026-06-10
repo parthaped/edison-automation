@@ -43,7 +43,7 @@ export function SearchResultCard({ result, query }: SearchResultCardProps) {
                 {result.title}
               </Link>
             </h2>
-            {result.relevanceScore > 0 ? (
+            {result.relevanceScore >= 5 ? (
               <Badge variant="outline" className="shrink-0 text-[10px] uppercase">
                 Relevant
               </Badge>

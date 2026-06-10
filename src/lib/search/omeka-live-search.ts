@@ -1,95 +1,26 @@
 import {
-  getFirstValue,
   itemToDocumentFields,
   searchOmekaItemsPage,
   type OmekaSearchFilters,
 } from "@/lib/omeka/client";
 import type { OmekaItem, SearchResponse } from "@/lib/omeka/types";
 import { expandQueryTerms } from "./query-expand";
+import { parseQueryIntent, hasCompoundTopicIntent } from "./query-intent";
 import type { SearchFilterParams } from "./index-types";
 import { hasSearchCriteria, parseSearchFilterParams } from "./search-filters";
+import {
+  getItemTranscriptionPreview,
+  meetsTopicThreshold,
+  MIN_RELEVANCE_SCORE,
+  scoreDocumentRelevance,
+  sortByRelevance,
+} from "./scoring";
 
 export class OmekaSearchError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "OmekaSearchError";
   }
-}
-
-function buildSnippet(
-  searchableText: string,
-  query: string,
-  expandedTerms: string[],
-): string {
-  const normalized = searchableText.replace(/\s+/g, " ").trim();
-  if (!normalized) {
-    return "";
-  }
-
-  const lower = normalized.toLowerCase();
-  const needles = [query.toLowerCase(), ...expandedTerms].filter(Boolean);
-
-  let bestIndex = -1;
-  for (const needle of needles) {
-    const index = lower.indexOf(needle);
-    if (index !== -1 && (bestIndex === -1 || index < bestIndex)) {
-      bestIndex = index;
-    }
-  }
-
-  const contextRadius = 160;
-  const start = bestIndex === -1 ? 0 : Math.max(0, bestIndex - 60);
-  const end = Math.min(normalized.length, start + contextRadius);
-  let snippet = normalized.slice(start, end).trim();
-
-  if (start > 0) {
-    snippet = `…${snippet}`;
-  }
-  if (end < normalized.length) {
-    snippet = `${snippet}…`;
-  }
-
-  return snippet;
-}
-
-function collectMatchedTerms(
-  haystack: string,
-  query: string,
-  expandedTerms: string[],
-): string[] {
-  const lower = haystack.toLowerCase();
-  const matched = new Set<string>();
-
-  if (query && lower.includes(query.toLowerCase())) {
-    matched.add(query);
-  }
-
-  for (const term of expandedTerms) {
-    if (term && lower.includes(term.toLowerCase())) {
-      matched.add(term);
-    }
-  }
-
-  return [...matched];
-}
-
-function itemSearchableText(item: OmekaItem): string {
-  const fields = itemToDocumentFields(item);
-  const transcription =
-    getFirstValue(item["scripto:transcription"]) || fields.transcriptionPreview;
-  return [
-    fields.title,
-    fields.description,
-    fields.documentType,
-    fields.date,
-    fields.creator,
-    fields.identifier,
-    fields.isPartOf,
-    ...fields.subjects,
-    transcription,
-  ]
-    .filter(Boolean)
-    .join(" ");
 }
 
 function toOmekaFilters(filters: SearchFilterParams): OmekaSearchFilters {
@@ -130,6 +61,24 @@ export interface OmekaLiveSearchOptions extends SearchFilterParams {
   perPage?: number;
 }
 
+function mapScoredItem(
+  item: OmekaItem,
+  query: string,
+  expandedTerms: string[],
+  intent: ReturnType<typeof parseQueryIntent>,
+) {
+  const fields = itemToDocumentFields(item);
+  const scored = scoreDocumentRelevance(item, query, expandedTerms, intent);
+
+  return {
+    ...fields,
+    snippet: scored.snippet || fields.description || fields.transcriptionPreview,
+    relevanceScore: scored.score,
+    matchedTerms: scored.matchedTerms,
+    transcriptionPreview: getItemTranscriptionPreview(item),
+  };
+}
+
 export async function searchOmekaLive(
   options: OmekaLiveSearchOptions,
 ): Promise<SearchResponse> {
@@ -166,37 +115,56 @@ export async function searchOmekaLive(
 
   const query = filters.query ?? "";
   const expandedTerms = query ? expandQueryTerms(query) : [];
+  const intent = query ? parseQueryIntent(query) : parseQueryIntent("");
 
   try {
     const omekaFilters = toOmekaFilters(filters);
-    const searchQuery = query || expandedTerms[0] || "";
-    const { items, totalResults } = await searchOmekaItemsPage(searchQuery, {
+    if (intent.documentTypeHint && !omekaFilters.documentType) {
+      omekaFilters.documentType = intent.documentTypeHint;
+    }
+
+    const searchQuery = intent.topicQuery || query || expandedTerms[0] || "";
+    const oversamplePerPage = Math.min(60, Math.max(perPage, perPage * 3));
+
+    const { items } = await searchOmekaItemsPage(searchQuery, {
       page,
-      perPage,
+      perPage: oversamplePerPage,
       filters: omekaFilters,
-      useFulltext: Boolean(query),
+      useFulltext: Boolean(searchQuery),
     });
 
-    const results = items.map((item) => {
-      const fields = itemToDocumentFields(item);
-      const searchableText = itemSearchableText(item);
-      return {
-        ...fields,
-        snippet: buildSnippet(searchableText, query, expandedTerms),
-        relevanceScore: 1,
-        matchedTerms: collectMatchedTerms(searchableText, query, expandedTerms),
-      };
-    });
+    const scoredResults = items
+      .map((item) => mapScoredItem(item, query, expandedTerms, intent))
+      .filter((result) => {
+        const item = items.find((entry) => entry["o:id"] === result.itemId);
+        if (!item) {
+          return false;
+        }
+        if (!meetsTopicThreshold(item, intent)) {
+          return false;
+        }
+        if (
+          hasCompoundTopicIntent(intent) &&
+          query &&
+          result.relevanceScore < MIN_RELEVANCE_SCORE
+        ) {
+          return false;
+        }
+        return true;
+      });
+
+    const sortedResults = sortByRelevance(scoredResults);
+    const pagedResults = sortedResults.slice(0, perPage);
 
     return {
       query,
       expandedTerms,
-      totalResults,
+      totalResults: sortedResults.length,
       page,
       perPage,
-      results,
+      results: pagedResults,
       facets: emptyFacets(),
-      searchMode: "keyword",
+      searchMode: intent.documentTypeHint ? "semantic" : "keyword",
       indexBuiltAt: null,
       manifestFacets: null,
     };

@@ -52,6 +52,38 @@ describe("searchOmekaLive", () => {
     thumbnail_display_urls: { medium: "https://example.com/thumb.jpg" },
   };
 
+  const crotonItem = {
+    "o:id": 99,
+    "o:title": "Letter from croton magnetic iron mines W H Hoffman to Thomas Alva Edison",
+    "dcterms:title": [
+      {
+        "@value": "Letter from croton magnetic iron mines W H Hoffman to Thomas Alva Edison",
+      },
+    ],
+    "dcterms:type": [{ "@value": "Letter" }],
+    "dcterms:subject": [{ "@value": "Iron mines and mining" }],
+    "scripto:transcription": [
+      {
+        "@value":
+          "Dear Mr Edison, we are writing about ore shipments from the Croton magnetic iron mines.",
+      },
+    ],
+  };
+
+  const motionPictureItem = {
+    "o:id": 100,
+    "o:title": "Letter about kinetoscope demonstrations",
+    "dcterms:title": [{ "@value": "Letter about kinetoscope demonstrations" }],
+    "dcterms:type": [{ "@value": "Letter" }],
+    "dcterms:subject": [{ "@value": "Motion pictures" }],
+    "scripto:transcription": [
+      {
+        "@value":
+          "We have been testing the kinetoscope and making motion pictures for upcoming exhibitions.",
+      },
+    ],
+  };
+
   beforeEach(() => {
     vi.stubGlobal(
       "fetch",
@@ -79,6 +111,34 @@ describe("searchOmekaLive", () => {
     expect(response.results[0]?.snippet.toLowerCase()).toContain("electric");
     expect(response.expandedTerms.length).toBeGreaterThan(0);
     expect(response.indexBuiltAt).toBeNull();
+  });
+
+  it("uses topic query and filters unrelated compound-query matches", async () => {
+    vi.unstubAllGlobals();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        expect(url).toContain("fulltext_search=making+motion+pictures");
+        expect(url).toContain("property%5B0%5D%5Bproperty%5D=dcterms%3Atype");
+        expect(url).toContain("property%5B0%5D%5Btext%5D=Letter");
+        return new Response(JSON.stringify([crotonItem, motionPictureItem]), {
+          status: 200,
+          headers: { "Omeka-S-Total-Results": "2" },
+        });
+      }),
+    );
+
+    const response = await searchOmekaLive({
+      query: "Letters about making motion pictures",
+      page: 1,
+      perPage: 10,
+    });
+
+    expect(response.searchMode).toBe("semantic");
+    expect(response.results).toHaveLength(1);
+    expect(response.results[0]?.itemId).toBe(100);
+    expect(response.results[0]?.relevanceScore).toBeGreaterThanOrEqual(5);
   });
 });
 

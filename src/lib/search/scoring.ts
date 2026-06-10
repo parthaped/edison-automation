@@ -1,5 +1,13 @@
+import {
+  extractSearchableText,
+  getFirstValue,
+  getValueStrings,
+} from "@/lib/omeka/client";
 import type { OmekaItem } from "@/lib/omeka/types";
-import { extractSearchableText } from "@/lib/omeka/client";
+import type { QueryIntent } from "./query-intent";
+import { hasCompoundTopicIntent } from "./query-intent";
+
+export const MIN_RELEVANCE_SCORE = 5;
 
 function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -11,7 +19,10 @@ function countTermMatches(text: string, terms: string[]): Map<string, number> {
 
   for (const term of terms) {
     if (!term) continue;
-    const pattern = new RegExp(`\\b${escapeRegex(term)}\\b`, "gi");
+    const pattern =
+      term.includes(" ") || term.includes("-")
+        ? new RegExp(escapeRegex(term), "gi")
+        : new RegExp(`\\b${escapeRegex(term)}\\b`, "gi");
     const matches = normalized.match(pattern);
     counts.set(term, matches?.length ?? 0);
   }
@@ -19,14 +30,65 @@ function countTermMatches(text: string, terms: string[]): Map<string, number> {
   return counts;
 }
 
+function getBodySearchableText(item: OmekaItem): string {
+  const parts = [
+    ...getValueStrings(item["dcterms:description"]),
+    ...getValueStrings(item["dcterms:subject"]),
+    ...getValueStrings(item["scripto:transcription"]),
+  ];
+  return parts.filter(Boolean).join(" ").toLowerCase();
+}
+
+function getTitleText(item: OmekaItem): string {
+  return (
+    (item["dcterms:title"]?.[0]?.["@value"] as string | undefined) ||
+    item["o:title"] ||
+    ""
+  ).toLowerCase();
+}
+
+function countTopicMatchesInText(text: string, topicTerms: string[]): number {
+  const counts = countTermMatches(text, topicTerms);
+  let hits = 0;
+  for (const count of counts.values()) {
+    if (count > 0) {
+      hits += 1;
+    }
+  }
+  return hits;
+}
+
+export function meetsTopicThreshold(item: OmekaItem, intent: QueryIntent): boolean {
+  if (!hasCompoundTopicIntent(intent)) {
+    return true;
+  }
+
+  const bodyText = getBodySearchableText(item);
+  const topicHits = countTopicMatchesInText(bodyText, intent.topicTerms);
+
+  if (intent.topicTerms.length >= 4) {
+    return topicHits >= 2;
+  }
+
+  if (intent.topicTerms.length >= 2) {
+    return topicHits >= 1;
+  }
+
+  return topicHits >= 1;
+}
+
 export function scoreDocumentRelevance(
   item: OmekaItem,
   query: string,
   expandedTerms: string[],
+  intent?: QueryIntent,
 ): { score: number; matchedTerms: string[]; snippet: string } {
   const searchableText = extractSearchableText(item);
   const normalizedText = searchableText.toLowerCase();
   const queryLower = query.toLowerCase();
+  const bodyText = getBodySearchableText(item);
+  const titleLower = getTitleText(item);
+  const topicTerms = intent?.topicTerms.length ? intent.topicTerms : expandedTerms;
 
   let score = 0;
   const matchedTerms: string[] = [];
@@ -36,14 +98,13 @@ export function scoreDocumentRelevance(
     matchedTerms.push(query);
   }
 
-  const title =
-    (item["dcterms:title"]?.[0]?.["@value"] as string | undefined) ||
-    item["o:title"] ||
-    "";
-  const titleLower = title.toLowerCase();
+  if (intent && intent.topicQuery && bodyText.includes(intent.topicQuery.toLowerCase())) {
+    score += 40;
+    matchedTerms.push(intent.topicQuery);
+  }
 
   if (titleLower.includes(queryLower)) {
-    score += 30;
+    score += 20;
   }
 
   const termCounts = countTermMatches(searchableText, expandedTerms);
@@ -57,6 +118,28 @@ export function scoreDocumentRelevance(
         ? 2
         : 0;
       score += count * (2 + titleBonus + subjectBonus);
+    }
+  }
+
+  const topicCounts = countTermMatches(bodyText, topicTerms);
+  for (const [term, count] of topicCounts) {
+    if (count > 0) {
+      matchedTerms.push(term);
+      const isPhrase = term.includes(" ");
+      score += count * (isPhrase ? 12 : 6);
+    }
+  }
+
+  if (intent && hasCompoundTopicIntent(intent)) {
+    const bodyTopicHits = countTopicMatchesInText(bodyText, intent.topicTerms);
+    const titleTopicHits = countTopicMatchesInText(titleLower, intent.topicTerms);
+
+    if (bodyTopicHits === 0 && titleTopicHits > 0) {
+      score -= 25;
+    }
+
+    if (bodyTopicHits === 0) {
+      score -= 15;
     }
   }
 
@@ -111,4 +194,8 @@ export function sortByRelevance<T extends { relevanceScore: number; title: strin
     }
     return left.title.localeCompare(right.title);
   });
+}
+
+export function getItemTranscriptionPreview(item: OmekaItem): string {
+  return getFirstValue(item["scripto:transcription"]).slice(0, 500);
 }

@@ -17,6 +17,39 @@ export function getItemPublicUrl(itemId: number): string {
   return `${DEFAULT_SITE_URL}/s/omeka/page/taep-item/${itemId}`;
 }
 
+/** Normalize a TAEP document identifier for IIIF manifest lookup. */
+export function normalizeDocumentIdentifier(identifier: string): string {
+  return identifier.trim().replace(/\s+/g, "");
+}
+
+/** Build candidate Edison Digital document IDs from an Omeka identifier value. */
+export function getDocumentIdCandidates(identifier: string): string[] {
+  const trimmed = identifier.trim();
+  if (!trimmed) {
+    return [];
+  }
+
+  const compact = normalizeDocumentIdentifier(trimmed);
+  const candidates = new Set<string>([compact]);
+
+  if (compact.includes("-")) {
+    candidates.add(compact.replace(/-/g, "_"));
+  }
+
+  return [...candidates].filter(Boolean);
+}
+
+/** Resolve a IIIF Presentation manifest URL from a document identifier, if possible. */
+export function getIiifManifestUrl(identifier: string): string | null {
+  const candidates = getDocumentIdCandidates(identifier);
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  const documentId = candidates.find((id) => !id.includes("-")) ?? candidates[0];
+  return `${DEFAULT_SITE_URL}/iiif/${encodeURIComponent(documentId)}/manifest`;
+}
+
 export function getValueStrings(values: OmekaValue[] | undefined): string[] {
   if (!values?.length) {
     return [];
@@ -298,6 +331,8 @@ export function itemToDocumentFields(item: OmekaItem) {
     item["o:title"] ||
     `Item ${item["o:id"]}`;
 
+  const identifier = getFirstValue(item["dcterms:identifier"]);
+
   return {
     itemId: item["o:id"],
     title,
@@ -305,7 +340,7 @@ export function itemToDocumentFields(item: OmekaItem) {
     documentType: getFirstValue(item["dcterms:type"]),
     date: getFirstValue(item["dcterms:date"]),
     creator: getFirstValue(item["dcterms:creator"]),
-    identifier: getFirstValue(item["dcterms:identifier"]),
+    identifier,
     isPartOf: getFirstValue(item["dcterms:isPartOf"]),
     subjects: getValueStrings(item["dcterms:subject"]),
     thumbnailUrl:
@@ -314,6 +349,7 @@ export function itemToDocumentFields(item: OmekaItem) {
       item.thumbnail_display_urls?.square ||
       null,
     edisonDigitalUrl: getItemPublicUrl(item["o:id"]),
+    iiifManifestUrl: identifier ? getIiifManifestUrl(identifier) : null,
     transcriptionPreview: getFirstValue(item["scripto:transcription"]).slice(0, 500),
   };
 }

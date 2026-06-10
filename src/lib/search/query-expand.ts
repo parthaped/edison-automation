@@ -12,6 +12,7 @@ const SYNONYM_GROUPS: string[][] = [
   ["patent", "invention", "invent", "invented", "application"],
   ["factory", "works", "mill", "plant", "manufacturing"],
   ["letter", "correspondence", "memo", "memorandum", "note", "notes"],
+  ["motion picture", "motion pictures", "kinetoscope", "cinematograph", "moving pictures", "moving picture", "film", "films", "movies", "cinema", "cinematography"],
   ["machine", "machinery", "apparatus", "device", "mechanism"],
   ["carbon", "filament", "electrode", "conductor"],
   ["mine", "mining", "extract", "extraction", "quarry"],
@@ -72,6 +73,30 @@ export function expandQueryTerms(query: string): string[] {
   }
 
   return [...expanded].slice(0, 20);
+}
+
+/** Expand only the topic portion of a compound query (avoids unrelated synonym groups). */
+export function expandTopicTerms(topicQuery: string): string[] {
+  const tokens = tokenize(topicQuery);
+  if (tokens.length === 0) {
+    return [];
+  }
+
+  const expanded = new Set<string>();
+  expanded.add(normalizeTerm(topicQuery));
+
+  for (const token of tokens) {
+    expanded.add(token);
+    for (const term of expandToken(token)) {
+      expanded.add(term);
+    }
+  }
+
+  for (let index = 0; index < tokens.length - 1; index++) {
+    expanded.add(`${tokens[index]} ${tokens[index + 1]}`);
+  }
+
+  return [...expanded].slice(0, 16);
 }
 
 export async function expandQueryWithAi(
