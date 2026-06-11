@@ -10,6 +10,7 @@ import {
   ZoomOut,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { parseIiifManifest } from "@/lib/iiif/manifest";
 
 interface IiifViewerProps {
   manifestUrl: string;
@@ -35,18 +36,27 @@ export function IiifViewer({
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [pageIndex, setPageIndex] = useState(initialPage);
   const [pageCount, setPageCount] = useState(1);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    const container = containerRef.current;
-    if (!container) {
-      return;
-    }
 
     async function initViewer() {
       setStatus("loading");
+      setErrorMessage(null);
 
       try {
+        const response = await fetch(getProxiedManifestUrl(manifestUrl));
+        if (!response.ok) {
+          throw new Error(`Manifest request failed (${response.status}).`);
+        }
+
+        const manifest = await response.json();
+        const pages = parseIiifManifest(manifest);
+        if (pages.length === 0) {
+          throw new Error("No page images were found in the IIIF manifest.");
+        }
+
         const OpenSeadragon = (await import("openseadragon")).default;
         if (cancelled || !containerRef.current) {
           return;
@@ -57,12 +67,18 @@ export function IiifViewer({
           viewerRef.current = null;
         }
 
-        const proxiedManifest = getProxiedManifestUrl(manifestUrl);
+        const tileSources = pages.map((page) => ({
+          type: "image" as const,
+          url: page.url,
+          buildPyramid: true,
+          crossOriginPolicy: "Anonymous" as const,
+        }));
+
         const viewer = OpenSeadragon({
           element: containerRef.current,
-          tileSources: proxiedManifest,
+          tileSources,
           sequenceMode: true,
-          initialPage: Math.max(0, initialPage),
+          initialPage: Math.min(Math.max(0, initialPage), pages.length - 1),
           showNavigationControl: false,
           showSequenceControl: false,
           showFullPageControl: false,
@@ -71,9 +87,10 @@ export function IiifViewer({
           blendTime: 0.1,
           constrainDuringPan: true,
           maxZoomPixelRatio: 2,
-          visibilityRatio: 0.5,
-          minZoomImageRatio: 0.5,
+          visibilityRatio: 1,
+          minZoomImageRatio: 0.9,
           defaultZoomLevel: 0,
+          homeFillsViewer: true,
           crossOriginPolicy: "Anonymous",
         });
 
@@ -83,8 +100,8 @@ export function IiifViewer({
           if (cancelled) {
             return;
           }
-          const count = viewer.world?.getItemCount?.() ?? 1;
-          setPageCount(Math.max(1, count));
+          viewer.viewport?.goHome(true);
+          setPageCount(pages.length);
           setPageIndex(viewer.currentPage?.() ?? 0);
           setStatus("ready");
         });
@@ -95,13 +112,21 @@ export function IiifViewer({
           }
         });
 
-        viewer.addHandler("open-failed", () => {
+        viewer.addHandler("open-failed", (event: { message?: string }) => {
           if (!cancelled) {
+            setErrorMessage(event.message ?? "Unable to open document pages.");
             setStatus("error");
           }
         });
-      } catch {
+
+        viewer.addHandler("resize", () => {
+          viewer.viewport?.goHome(true);
+        });
+      } catch (error) {
         if (!cancelled) {
+          setErrorMessage(
+            error instanceof Error ? error.message : "Unable to load the IIIF viewer.",
+          );
           setStatus("error");
         }
       }
@@ -117,6 +142,25 @@ export function IiifViewer({
       }
     };
   }, [manifestUrl, initialPage]);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container || status !== "ready") {
+      return;
+    }
+
+    const observer = new ResizeObserver(() => {
+      const viewer = viewerRef.current;
+      if (!viewer) {
+        return;
+      }
+      viewer.forceRedraw?.();
+      viewer.viewport?.goHome(true);
+    });
+
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [status]);
 
   function goToPage(nextPage: number) {
     const viewer = viewerRef.current;
@@ -156,7 +200,8 @@ export function IiifViewer({
           />
         ) : null}
         <p className="text-sm text-muted-foreground">
-          The IIIF viewer could not load this document. You can still view it on Edison Digital.
+          {errorMessage ??
+            "The IIIF viewer could not load this document. You can still view it on Edison Digital."}
         </p>
         {edisonDigitalUrl ? (
           <Button
@@ -174,8 +219,8 @@ export function IiifViewer({
   }
 
   return (
-    <div className="overflow-hidden rounded-lg border border-border bg-[#1a1a1a]">
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/10 px-3 py-2 text-white">
+    <div className="flex h-[calc(100svh-4.5rem)] min-h-[520px] w-full flex-col overflow-hidden bg-[#111]">
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-white/10 px-4 py-2 text-white">
         <p className="text-xs font-medium uppercase tracking-wide text-white/70">{title}</p>
         <div className="flex flex-wrap items-center gap-1">
           <Button
@@ -239,13 +284,16 @@ export function IiifViewer({
         </div>
       </div>
 
-      <div className="relative min-h-[420px] sm:min-h-[560px]">
+      <div className="relative min-h-0 flex-1">
         {status === "loading" ? (
-          <div className="absolute inset-0 flex items-center justify-center text-sm text-white/70">
+          <div className="absolute inset-0 z-10 flex items-center justify-center text-sm text-white/70">
             Loading document viewer…
           </div>
         ) : null}
-        <div ref={containerRef} className="h-[420px] w-full sm:h-[560px]" />
+        <div
+          ref={containerRef}
+          className="iiif-viewer-canvas absolute inset-0 h-full w-full"
+        />
       </div>
     </div>
   );

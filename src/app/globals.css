@@ -165,3 +165,13 @@ input {
     scroll-behavior: auto !important;
   }
 }
+
+.iiif-viewer-canvas .openseadragon-container,
+.iiif-viewer-canvas .openseadragon-canvas {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.iiif-viewer-canvas .openseadragon-container {
+  background: #111 !important;
+}

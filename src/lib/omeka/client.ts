@@ -39,15 +39,27 @@ export function getDocumentIdCandidates(identifier: string): string[] {
   return [...candidates].filter(Boolean);
 }
 
+/** Extract the TAEP document ID from an Omeka identifier (drops page suffixes). */
+export function extractDocumentIdFromIdentifier(identifier: string): string {
+  const compact = normalizeDocumentIdentifier(identifier);
+  const pageSuffixMatch = compact.match(/^(.+)_(\d{3,5})$/);
+  const base = pageSuffixMatch?.[1] ?? compact;
+
+  if (base.includes("-")) {
+    return base.replace(/-/g, "_");
+  }
+
+  return base;
+}
+
 /** Resolve a IIIF Presentation manifest URL from a document identifier, if possible. */
 export function getIiifManifestUrl(identifier: string): string | null {
-  const candidates = getDocumentIdCandidates(identifier);
-  if (candidates.length === 0) {
+  const documentId = extractDocumentIdFromIdentifier(identifier);
+  if (!documentId) {
     return null;
   }
 
-  const documentId = candidates.find((id) => !id.includes("-")) ?? candidates[0];
-  return `${DEFAULT_SITE_URL}/iiif/${encodeURIComponent(documentId)}/manifest`;
+  return `${DEFAULT_SITE_URL}/iiif/2/${encodeURIComponent(documentId)}/manifest`;
 }
 
 export function getValueStrings(values: OmekaValue[] | undefined): string[] {
