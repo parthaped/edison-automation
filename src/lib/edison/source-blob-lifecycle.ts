@@ -42,7 +42,6 @@ export function shouldDeleteSourceAfterRasterize(input: {
     fileSizeBytes: input.blob.size,
     pageCount,
     hasPageImages: input.prepared.urls.length > 0,
-    env: input.env,
   });
 }
 
@@ -61,7 +60,6 @@ export function shouldDeleteSourceAfterTranscribe(input: {
     fileSizeBytes: input.blob.size,
     pageCount,
     hasPageImages: input.prepared.urls.length > 0,
-    env: input.env,
   });
 
   if (!usesWholeFilePath) return false;

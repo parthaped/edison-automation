@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -27,11 +27,11 @@ export interface RasterizePdfResult {
  *
  * | Backend   | When used | Tradeoffs |
  * |-----------|-----------|-----------|
- * | `pdfjs`   | Default in serverless (no extra deps) | Pure Node; sequential pages; higher memory on huge PDFs |
- * | `pdftoppm`| When `EDISON_PDFTOPPM_PATH` is set (Poppler) | Much faster on large scans; needs binary on the host or Sandbox |
+ * | `pdfjs`   | Default fallback (no extra deps) | Pure Node; sequential pages; higher memory on huge PDFs |
+ * | `pdftoppm`| When `EDISON_PDFTOPPM_PATH` is set (Poppler) | Much faster on large scans; fits Amarel/local hosts with Poppler |
  *
- * Vercel Sandbox + `pdftoppm` is the production target in docs/architecture.md.
- * This module keeps pdfjs as the portable fallback until Sandbox wiring lands.
+ * Amarel and local GPU hosts should prefer `pdftoppm`; pdfjs remains the
+ * portable fallback when Poppler is not configured.
  */
 export function getRasterizeBackend(
   env: NodeJS.ProcessEnv = process.env,
@@ -76,7 +76,6 @@ async function rasterizeWithPdftoppm(
   const outputPrefix = join(tempDir, "page");
 
   try {
-    const { writeFile } = await import("node:fs/promises");
     await writeFile(inputPath, bytes);
 
     await execFileAsync(

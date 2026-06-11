@@ -1,7 +1,12 @@
 import type { SearchResponse } from "@/lib/omeka/types";
 import type { SearchFilterParams } from "./index-types";
 import { hasSearchCriteria, parseSearchFilterParams } from "./search-filters";
+import { hybridSearch } from "./hybrid-search";
 import { searchOmekaLive } from "./omeka-live-search";
+import {
+  isSemanticSearchAvailable,
+  isSemanticSearchConfigured,
+} from "./vector-search-client";
 
 export interface SemanticSearchOptions extends SearchFilterParams {
   page?: number;
@@ -47,6 +52,15 @@ export async function semanticSearch(
       indexBuiltAt: null,
       manifestFacets: null,
     };
+  }
+
+  const useHybrid =
+    Boolean(filters.query?.trim()) &&
+    isSemanticSearchConfigured() &&
+    (await isSemanticSearchAvailable());
+
+  if (useHybrid) {
+    return hybridSearch({ ...options, page, perPage });
   }
 
   return searchOmekaLive({ ...options, page, perPage });

@@ -61,7 +61,7 @@ export async function GET(request: Request) {
       manifestUrl,
       indexUrl,
       message:
-        "Index cache refreshed. Full rebuild: run `npm run search:build` locally, then upload to Blob.",
+        "Index cache refreshed. Live Omeka search remains available without a local index build.",
     });
   } catch (error) {
     return NextResponse.json(
@@ -71,7 +71,7 @@ export async function GET(request: Request) {
         indexUrl,
         error: error instanceof Error ? error.message : "Index unavailable",
         message:
-          "Run `npm run search:build` locally with BLOB_READ_WRITE_TOKEN to publish the search index.",
+          "Search index cache is unavailable. Live Omeka search remains available.",
       },
       { status: 503 },
     );

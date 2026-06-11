@@ -40,18 +40,12 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# local OCR/HTR datasets and model artifacts
+# local OCR datasets and model artifacts
 /ml/.venv/
-/ml/.venv-surya-trocr/
-/ml/.venv-paddle-vl/
+/ml/.venv-qwen-vl/
 /ml/**/__pycache__/
-/ml/data/cache/
-/ml/data/raw/
-/ml/data/manifests/*.csv
-/ml/data/manifests/*.jsonl
+/ml/data/
+/ml/reports/
 /ml/models/
-/ml/reports/*.jsonl
-/ml/reports/*.csv
-/ml/reports/*.html
 
 .vercel

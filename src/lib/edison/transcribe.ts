@@ -5,8 +5,6 @@ import {
   getDefaultOcrModelLabel,
   resolveGeminiModel,
 } from "./gemini-model";
-import { getLocalOcrUrl } from "./local-ocr-config";
-import { transcribeWithLocalOcr } from "./local-ocr";
 import { getActivePrompt, type TranscriptionPromptTask } from "./prompts";
 
 // Multimodal OCR / HTR and metadata extraction via the Google Gemini API.
@@ -181,16 +179,6 @@ export async function transcribeDocument(
 
   const modelLabel = input.model ?? getDefaultOcrModelLabel();
   const activePrompt = getActivePrompt(input.promptTask ?? "diplomatic-transcription");
-
-  const localOcrUrl = getLocalOcrUrl();
-  if (localOcrUrl) {
-    const { signal, cleanup } = combineSignals(input.signal, getRequestTimeoutMs());
-    try {
-      return await transcribeWithLocalOcr(input, localOcrUrl, signal);
-    } finally {
-      cleanup();
-    }
-  }
 
   const mediaPart =
     mediaType === SUPPORTED_PDF_MIME_TYPE

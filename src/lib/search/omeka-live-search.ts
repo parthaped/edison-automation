@@ -59,6 +59,8 @@ function emptyFacets() {
 export interface OmekaLiveSearchOptions extends SearchFilterParams {
   page?: number;
   perPage?: number;
+  /** When set, return up to this many scored results instead of slicing to perPage. */
+  maxResults?: number;
 }
 
 function mapScoredItem(
@@ -154,7 +156,8 @@ export async function searchOmekaLive(
       });
 
     const sortedResults = sortByRelevance(scoredResults);
-    const pagedResults = sortedResults.slice(0, perPage);
+    const resultLimit = options.maxResults ?? perPage;
+    const pagedResults = sortedResults.slice(0, resultLimit);
 
     return {
       query,

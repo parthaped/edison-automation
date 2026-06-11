@@ -6,11 +6,8 @@ import {
   fetch,
   sleep,
 } from "workflow";
-import { isTranscriptionEnabled, isLocalOcrEnabled } from "../local-ocr-config";
-import { isOcrQueueEnabled } from "../ocr-queue-config";
-import { createAndWaitForOcrQueueJob } from "../ocr-queue-transcribe";
+import { isTranscriptionEnabled } from "../transcription-config";
 import { createExtractionPlan, type ExtractionPlan } from "../extraction";
-import { formatOcrTranscriptionWithGemini } from "../format-ocr-transcription";
 import {
   assignDocumentId,
   defaultFolderIdFromFileName,
@@ -481,37 +478,6 @@ async function transcribePreparedFile(
       const chunkResults: TranscribePageChunkResult[] = [];
       const failedRanges: string[] = [];
 
-      if (isOcrQueueEnabled()) {
-        try {
-          const queueResult = await transcribeViaOcrQueueStep({
-            fileName: blob.name,
-            pages: Array.from({ length: pageCount }, (_, index) => {
-              const pageNumber = index + 1;
-              const url = urlByPage.get(pageNumber);
-              if (!url) {
-                throw new RetryableError(
-                  `Missing rasterized page URL for page ${pageNumber} in ${blob.name}.`,
-                );
-              }
-              return { pageNumber, imageUrl: url };
-            }),
-          });
-          chunkResults.push(queueResult);
-        } catch (error) {
-          const message =
-            error instanceof Error ? error.message : String(error);
-          failedRanges.push(`1-${pageCount}`);
-          errors.push({ fileName: blob.name, stage: "transcription", message });
-          if (error instanceof RetryableError) {
-            throw error;
-          }
-          if (isTransientError(error)) {
-            throw new RetryableError(
-              `OCR queue transcription failed for ${blob.name}: ${message}`,
-            );
-          }
-        }
-      } else {
       const chunkConcurrency = getPageChunkConcurrency();
       const batchDelayMs = getPageChunkBatchDelayMs();
       for (
@@ -527,7 +493,6 @@ async function transcribePreparedFile(
           batch.map((range) =>
             transcribePageChunkStep({
               fileName: blob.name,
-              documentId,
               promptTask,
               pages: pagesForRange(range, urlByPage),
             }),
@@ -551,7 +516,6 @@ async function transcribePreparedFile(
           }
         }
       }
-      }
 
       if (failedRanges.length > 0) {
         throw new RetryableError(
@@ -568,7 +532,7 @@ async function transcribePreparedFile(
           subDocuments: [],
           errors,
           transcribeMs: Date.now() - transcribeStarted,
-          transcribeChunkCount: isOcrQueueEnabled() ? 1 : ranges.length,
+          transcribeChunkCount: ranges.length,
         };
       }
 
@@ -583,46 +547,21 @@ async function transcribePreparedFile(
         .flatMap((chunk) => chunk.pages)
         .sort((a, b) => a.pageNumber - b.pageNumber);
 
-      const shouldFormatWithGemini =
-        isGeminiConfigured() && (isOcrQueueEnabled() || isLocalOcrEnabled());
-      let pagesForMerge = orderedPages;
-      let formatInputTokens = 0;
-      let formatOutputTokens = 0;
-      if (shouldFormatWithGemini) {
-        const formatted = await formatOcrTranscriptionStep({
-          documentId,
-          folderId: defaultFolderIdFromFileName(blob.name),
-          promptTask,
-          pages: orderedPages,
-        });
-        pagesForMerge = formatted.pages;
-        formatInputTokens = formatted.inputTokens ?? 0;
-        formatOutputTokens = formatted.outputTokens ?? 0;
-      }
-
       const subDocumentPlans = isGeminiConfigured()
         ? await analyzeChunkedDocumentStructureStep({
             fileName: blob.name,
             promptTask,
-            pages: pagesForMerge,
+            pages: orderedPages,
             totalPages: pageCount,
           })
         : [];
 
       const mergedChunkResult: TranscribePageChunkResult = {
-        pages: pagesForMerge,
+        pages: orderedPages,
         model: chunkResults[0]?.model ?? "unknown",
         promptVersion: chunkResults[0]?.promptVersion ?? "unknown",
-        inputTokens: (() => {
-          const total =
-            (chunkResults[0]?.inputTokens ?? 0) + formatInputTokens;
-          return total > 0 ? total : undefined;
-        })(),
-        outputTokens: (() => {
-          const total =
-            (chunkResults[0]?.outputTokens ?? 0) + formatOutputTokens;
-          return total > 0 ? total : undefined;
-        })(),
+        inputTokens: sumTokenUsage(chunkResults, "inputTokens"),
+        outputTokens: sumTokenUsage(chunkResults, "outputTokens"),
       };
 
       const merged = mergePageChunkResults(
@@ -636,7 +575,7 @@ async function transcribePreparedFile(
       const transcribeMs = Date.now() - transcribeStarted;
       console.info("[batch-ingest] transcribe:chunked", {
         fileName: blob.name,
-        chunks: isOcrQueueEnabled() ? 1 : ranges.length,
+        chunks: ranges.length,
         pageBased: usePageBased,
         transcribeMs,
       });
@@ -648,7 +587,7 @@ async function transcribePreparedFile(
         outputTokens: merged.outputTokens,
         errors,
         transcribeMs,
-        transcribeChunkCount: isOcrQueueEnabled() ? 1 : ranges.length,
+        transcribeChunkCount: ranges.length,
       };
     }
 
@@ -704,31 +643,8 @@ async function transcribeWholeFileStep(input: {
   };
 }
 
-async function transcribeViaOcrQueueStep(input: {
-  fileName: string;
-  pages: Array<{ pageNumber: number; imageUrl: string }>;
-}): Promise<TranscribePageChunkResult> {
-  "use step";
-
-  try {
-    return await createAndWaitForOcrQueueJob({
-      fileName: input.fileName,
-      pages: input.pages,
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    if (isTransientError(error)) {
-      throw new RetryableError(
-        `OCR queue transcription failed for ${input.fileName}: ${message}`,
-      );
-    }
-    throw error;
-  }
-}
-
 async function transcribePageChunkStep(input: {
   fileName: string;
-  documentId: string;
   promptTask: "diplomatic-transcription" | "project-notebook";
   pages: PageImageRef[];
 }): Promise<TranscribePageChunkResult> {
@@ -743,7 +659,6 @@ async function transcribePageChunkStep(input: {
   try {
     return await transcribePageChunkResilient({
       pages: input.pages,
-      documentId: input.documentId,
       promptTask: input.promptTask,
     });
   } catch (error) {
@@ -757,20 +672,12 @@ async function transcribePageChunkStep(input: {
   }
 }
 
-async function formatOcrTranscriptionStep(input: {
-  documentId: string;
-  folderId: string;
-  promptTask: "diplomatic-transcription" | "project-notebook";
-  pages: Array<{ pageNumber: number; text: string }>;
-}) {
-  "use step";
-
-  return await formatOcrTranscriptionWithGemini({
-    documentId: input.documentId,
-    folderId: input.folderId,
-    promptTask: input.promptTask,
-    pages: input.pages,
-  });
+function sumTokenUsage(
+  chunks: TranscribePageChunkResult[],
+  field: "inputTokens" | "outputTokens",
+): number | undefined {
+  const total = chunks.reduce((sum, chunk) => sum + (chunk[field] ?? 0), 0);
+  return total > 0 ? total : undefined;
 }
 
 async function analyzeChunkedDocumentStructureStep(input: {

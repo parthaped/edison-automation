@@ -41,41 +41,13 @@ describe("shouldUsePageChunkedTranscription", () => {
 });
 
 describe("shouldUsePageBasedTranscription", () => {
-  it("uses page images for all PDFs when OCR queue is enabled", () => {
-    const env = { ...process.env, EDISON_OCR_QUEUE_ENABLED: "true" };
-    expect(
-      shouldUsePageBasedTranscription({
-        mimeType: "application/pdf",
-        fileSizeBytes: 1024,
-        pageCount: 5,
-        hasPageImages: true,
-        env,
-      }),
-    ).toBe(true);
-  });
-
-  it("uses page images for single-page images when OCR queue is enabled", () => {
-    const env = { ...process.env, EDISON_OCR_QUEUE_ENABLED: "true" };
-    expect(
-      shouldUsePageBasedTranscription({
-        mimeType: "image/jpeg",
-        fileSizeBytes: 1024,
-        pageCount: 1,
-        hasPageImages: true,
-        env,
-      }),
-    ).toBe(true);
-  });
-
-  it("falls back to large-PDF chunking when queue is disabled", () => {
-    const env = { ...process.env, EDISON_OCR_QUEUE_ENABLED: "false" };
+  it("uses page images for large PDFs only", () => {
     expect(
       shouldUsePageBasedTranscription({
         mimeType: "application/pdf",
         fileSizeBytes: 1024,
         pageCount: 20,
         hasPageImages: true,
-        env,
       }),
     ).toBe(true);
     expect(
@@ -84,7 +56,17 @@ describe("shouldUsePageBasedTranscription", () => {
         fileSizeBytes: 1024,
         pageCount: 5,
         hasPageImages: true,
-        env,
+      }),
+    ).toBe(false);
+  });
+
+  it("skips page-based transcription when page images are unavailable", () => {
+    expect(
+      shouldUsePageBasedTranscription({
+        mimeType: "application/pdf",
+        fileSizeBytes: 60 * 1024 * 1024,
+        pageCount: 20,
+        hasPageImages: false,
       }),
     ).toBe(false);
   });

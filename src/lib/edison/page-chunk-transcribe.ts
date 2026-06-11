@@ -10,8 +10,6 @@ import {
   retryBackoffMs,
   sleepMs,
 } from "./ai-request";
-import { isLocalOcrEnabled } from "./local-ocr-config";
-import { transcribePageImageWithLocalOcr } from "./local-ocr";
 import { getDefaultOcrModelLabel, resolveGeminiModel } from "./gemini-model";
 import type { TranscriptionPromptTask } from "./prompts";
 import { getActivePrompt } from "./prompts";
@@ -81,8 +79,6 @@ export interface TranscribePageChunkInput {
   promptTask?: TranscriptionPromptTask;
   model?: string;
   signal?: AbortSignal;
-  /** Used for Edison Markdown ## page headings during Kraken→Gemini reformat. */
-  documentId?: string;
 }
 
 export interface TranscribePageChunkResult {
@@ -154,46 +150,6 @@ export async function transcribePageChunk(
   input: TranscribePageChunkInput,
 ): Promise<TranscribePageChunkResult> {
   const promptTask = input.promptTask ?? "diplomatic-transcription";
-
-  if (isLocalOcrEnabled()) {
-    const { signal, cleanup } = combineSignals(
-      input.signal,
-      getRequestTimeoutMs(),
-    );
-    try {
-      const pageResults = await Promise.all(
-        input.pages.map(async (page) => {
-          const bytes = await fetchImageBytes(page.url);
-          const result = await transcribePageImageWithLocalOcr({
-            bytes,
-            mediaType: "image/jpeg",
-            signal,
-          });
-          return {
-            pageNumber: page.pageNumber,
-            text: result.text,
-            model: result.model,
-            promptVersion: result.promptVersion,
-          };
-        }),
-      );
-      const model = pageResults[0]?.model ?? "local/qwen2.5-vl-7b-instruct";
-      const promptVersion =
-        pageResults[0]?.promptVersion ?? "local-qwen-vl-v1";
-      return {
-        pages: pageResults
-          .map((entry) => ({
-            pageNumber: entry.pageNumber,
-            text: entry.text.trim(),
-          }))
-          .sort((a, b) => a.pageNumber - b.pageNumber),
-        model,
-        promptVersion,
-      };
-    } finally {
-      cleanup();
-    }
-  }
 
   const modelLabel = input.model ?? getDefaultOcrModelLabel();
   const activePrompt = getActivePrompt(promptTask);
@@ -297,7 +253,7 @@ export async function transcribePageChunkResilient(
   }
 
   const err = toError(lastError);
-  if (isRateLimitError(err) && !isLocalOcrEnabled()) {
+  if (isRateLimitError(err)) {
     throw err;
   }
 

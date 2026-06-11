@@ -1,71 +1,9 @@
 import Image from "next/image";
 import Link from "next/link";
+import { EXPLORE_CARDS, type ExploreCardConfig } from "@/lib/landing-images";
 import { cn } from "@/lib/utils";
 
-const EDISON_SITE = "https://edison.rutgers.edu";
-
-type ExploreCard = {
-  title: string;
-  image: string;
-  href: string;
-  external?: boolean;
-  className?: string;
-};
-
-const exploreCards: ExploreCard[] = [
-  {
-    title: "Biographical Essays",
-    image: "/landing/innovations.jpg",
-    href: `${EDISON_SITE}/life-of-edison/biographical-essays`,
-    external: true,
-    className: "sm:col-span-2 lg:col-span-2 lg:row-span-2",
-  },
-  {
-    title: "Inventions",
-    image: "/landing/inventions.jpg",
-    href: `${EDISON_SITE}/life-of-edison/inventions`,
-    external: true,
-    className: "sm:col-span-2 lg:col-span-2",
-  },
-  {
-    title: "Document Sampler",
-    image: "/landing/document-sampler.jpg",
-    href: `${EDISON_SITE}/research/document-sampler`,
-    external: true,
-    className: "sm:col-span-2 lg:col-span-2",
-  },
-  {
-    title: "Patents",
-    image: "/landing/Patents.jpg",
-    href: `${EDISON_SITE}/research/edison-s-patents`,
-    external: true,
-  },
-  {
-    title: "Lewis Howard Latimer",
-    image: "/landing/Latimer.jpg",
-    href: `${EDISON_SITE}/resources/latimer`,
-    external: true,
-  },
-  {
-    title: "Edison's Digital Documents",
-    image: "/landing/digital_documents.jpg",
-    href: `${EDISON_SITE}/research/digital-edition`,
-    external: true,
-  },
-  {
-    title: "Motion Pictures",
-    image: "/landing/motion-pictures.jpg",
-    href: `${EDISON_SITE}/research/motion-picture-catalogs`,
-    external: true,
-  },
-  {
-    title: "Thomas Edison's New Jersey",
-    image: "/landing/Thomas_Edisons_New_Jersey.jpg",
-    href: "https://uploads.knightlab.com/storymapjs/a12cc1cc54c4c8e08420a3954abf6183/thomas-edisons-new-jersey-1/index.html",
-    external: true,
-    className: "lg:col-span-2",
-  },
-];
+type ExploreCard = ExploreCardConfig;
 
 function ExploreCardLink({ card }: { card: ExploreCard }) {
   const content = (
@@ -132,7 +70,7 @@ export function LandingExploreGrid() {
       </div>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 lg:auto-rows-[12rem]">
-        {exploreCards.map((card) => (
+        {EXPLORE_CARDS.map((card) => (
           <ExploreCardLink key={card.title} card={card} />
         ))}
       </div>

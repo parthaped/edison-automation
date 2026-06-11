@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Transcribe Edison archival page images with Qwen2.5-VL-7B-Instruct (4-bit)."""
+"""Transcribe Edison archival page images with full Qwen3-VL-8B-Instruct."""
 
 from __future__ import annotations
 
@@ -14,69 +14,22 @@ if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 
-def _patch_torch_fp8_compat() -> None:
-    """Allow transformers 5.10+ on torch<2.7 until requirements pin is applied."""
-    try:
-        import torch
-    except ImportError:
-        return
-    if not hasattr(torch, "float8_e8m0fnu"):
-        setattr(torch, "float8_e8m0fnu", torch.float32)
+from transcription_text import DIPLOMATIC_PROMPT, parse_transcription_lines  # noqa: E402
 
+try:
+    import torch
+    from transformers import AutoModelForImageTextToText, AutoProcessor
+except (ImportError, ModuleNotFoundError, AttributeError) as error:
+    torch = None  # type: ignore[assignment]
+    AutoModelForImageTextToText = None  # type: ignore[assignment]
+    AutoProcessor = None  # type: ignore[assignment]
+    QWEN_IMPORT_ERROR: BaseException | None = error
+else:
+    QWEN_IMPORT_ERROR = None
 
-def _patch_bitsandbytes_hf_compat() -> None:
-    """transformers 5.x + accelerate pass _is_hf_initialized into Params4bit (bnb<0.50)."""
-    try:
-        import bitsandbytes as bnb
-    except ImportError:
-        return
-
-    for name in ("Params4bit", "Int8Params"):
-        param_cls = getattr(bnb.nn, name, None)
-        if param_cls is None:
-            continue
-        original_new = param_cls.__new__
-
-        def make_patched(original):  # noqa: ANN001
-            def patched(cls, *args, **kwargs):  # noqa: ANN001
-                kwargs.pop("_is_hf_initialized", None)
-                return original(cls, *args, **kwargs)
-
-            return patched
-
-        param_cls.__new__ = make_patched(original_new)
-
-
-_patch_torch_fp8_compat()
-
-from vision_transcribe import DIPLOMATIC_PROMPT, parse_transcription_lines  # noqa: E402
-
-DEFAULT_MODEL_DIR = Path("ml/models/Qwen2.5-VL-7B-Instruct")
-PROMPT_VERSION = "local-qwen-vl-v1"
-MODEL_LABEL = "local/qwen2.5-vl-7b-instruct"
-LOW_VRAM_GB = 6.0
-
-
-def gpu_vram_gb() -> float | None:
-    try:
-        import torch
-    except ImportError:
-        return None
-    if not torch.cuda.is_available():
-        return None
-    return torch.cuda.get_device_properties(0).total_memory / (1024**3)
-
-
-def resolve_load_strategy(explicit_cpu_offload: bool | None) -> str:
-    """Pick 4-bit load target. Split GPU/CPU offload is unreliable with bnb on 4 GB GPUs."""
-    if explicit_cpu_offload is False:
-        return "gpu"
-    if explicit_cpu_offload is True:
-        return "cpu"
-    vram = gpu_vram_gb()
-    if vram is None or vram <= LOW_VRAM_GB:
-        return "cpu"
-    return "gpu"
+DEFAULT_MODEL_DIR = Path("ml/models/Qwen3-VL-8B-Instruct")
+PROMPT_VERSION = "local-qwen3-vl-v1"
+MODEL_LABEL = "local/qwen3-vl-8b-instruct"
 
 
 def parse_args() -> argparse.Namespace:
@@ -87,90 +40,91 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output", type=Path, default=None, help="Optional output text file.")
     parser.add_argument("--json", action="store_true", help="Emit local OCR contract JSON.")
     parser.add_argument(
-        "--cpu-offload",
-        action="store_true",
-        default=None,
-        help="Load and run 4-bit model on CPU (default: auto for GPUs <= 6 GB).",
+        "--device-map",
+        default="auto",
+        help='Transformers device_map for the full model. Defaults to "auto" for Amarel GPU nodes.',
     )
     parser.add_argument(
-        "--no-cpu-offload",
-        action="store_true",
-        help="Load all 4-bit weights on GPU (needs ~6+ GB VRAM).",
+        "--torch-dtype",
+        choices=("auto", "bfloat16", "float16", "float32"),
+        default="bfloat16",
+        help="Torch dtype for unquantized weights.",
+    )
+    parser.add_argument(
+        "--attn-implementation",
+        default=None,
+        help='Optional Transformers attention implementation, e.g. "flash_attention_2".',
     )
     return parser.parse_args()
+
+
+def resolve_torch_dtype(torch_module: object, dtype_name: str) -> object:
+    if dtype_name == "auto":
+        return "auto"
+    return getattr(torch_module, dtype_name)
 
 
 @dataclass
 class QwenVlTranscriber:
     model_dir: Path
     max_new_tokens: int = 4096
-    cpu_offload: bool | None = None
+    device_map: str = "auto"
+    torch_dtype: str = "bfloat16"
+    attn_implementation: str | None = None
     _model: object | None = None
     _processor: object | None = None
-    _inference_device: str = "cpu"
-
-    def _load_strategy(self) -> str:
-        return resolve_load_strategy(self.cpu_offload)
+    _input_device: object | None = None
 
     def _load(self) -> None:
         if self._model is not None and self._processor is not None:
             return
 
-        try:
-            import torch
-            _patch_bitsandbytes_hf_compat()
-            from qwen_vl_utils import process_vision_info
-            from transformers import AutoProcessor, BitsAndBytesConfig, Qwen2_5_VLForConditionalGeneration
-        except (ImportError, ModuleNotFoundError, AttributeError) as error:
+        if (
+            QWEN_IMPORT_ERROR is not None
+            or torch is None
+            or AutoModelForImageTextToText is None
+            or AutoProcessor is None
+        ):
             raise RuntimeError(
                 "Qwen VLM import failed. Run: pip install -r ml/requirements-qwen-vl.txt "
-                "(needs transformers>=4.49,<5.10 with torch 2.6+cu124). "
-                f"Original error: {error}"
-            ) from error
+                "(needs transformers>=4.57 with torch 2.6+cu124). "
+                f"Original error: {QWEN_IMPORT_ERROR}"
+            ) from QWEN_IMPORT_ERROR
 
         if not self.model_dir.exists():
             raise RuntimeError(
                 f"Model not found at {self.model_dir}. Run: python ml/scripts/download_qwen_vl.py"
             )
 
-        load_strategy = self._load_strategy()
-        on_cpu = load_strategy == "cpu"
-        compute_dtype = torch.float32 if on_cpu else torch.bfloat16
-        bnb_config = BitsAndBytesConfig(
-            load_in_4bit=True,
-            bnb_4bit_quant_type="nf4",
-            bnb_4bit_compute_dtype=compute_dtype,
-        )
-        load_kwargs: dict[str, object] = {
-            "quantization_config": bnb_config,
-            "device_map": "cpu" if on_cpu else "auto",
-        }
-
-        if on_cpu:
-            vram = gpu_vram_gb()
-            label = f"{vram:.1f} GB GPU detected" if vram is not None else "no CUDA"
-            print(
-                f"Qwen2.5-VL: using CPU inference ({label}). "
-                "Load + first page may take several minutes.",
-                file=sys.stderr,
+        device_map_lower = self.device_map.lower()
+        if device_map_lower != "cpu" and not torch.cuda.is_available():
+            raise RuntimeError(
+                "CUDA is not available. Run on an Amarel GPU node or pass "
+                '--device-map cpu --torch-dtype float32 for a slow local smoke test.'
             )
-            self._inference_device = "cpu"
-        else:
-            print("Qwen2.5-VL: using GPU inference (4-bit).", file=sys.stderr)
-            self._inference_device = "cuda:0" if torch.cuda.is_available() else "cpu"
 
-        self._model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
+        dtype = resolve_torch_dtype(torch, self.torch_dtype)
+        load_kwargs: dict[str, object] = {
+            "dtype": dtype,
+            "device_map": self.device_map,
+        }
+        if self.attn_implementation:
+            load_kwargs["attn_implementation"] = self.attn_implementation
+
+        print(
+            f"Qwen3-VL: loading full unquantized weights "
+            f"(dtype={self.torch_dtype}, device_map={self.device_map}).",
+            file=sys.stderr,
+        )
+        self._model = AutoModelForImageTextToText.from_pretrained(
             str(self.model_dir),
             **load_kwargs,
         )
-        max_pixels = 1024 * 28 * 28 if on_cpu else 1280 * 28 * 28
-        self._processor = AutoProcessor.from_pretrained(
-            str(self.model_dir),
-            min_pixels=256 * 28 * 28,
-            max_pixels=max_pixels,
-        )
+        self._processor = AutoProcessor.from_pretrained(str(self.model_dir))
+        self._input_device = getattr(self._model, "device", None)
+        if self._input_device is None:
+            self._input_device = next(self._model.parameters()).device  # type: ignore[union-attr]
         self._torch = torch
-        self._process_vision_info = process_vision_info
 
     def transcribe_page(self, image_path: Path) -> tuple[list[str], str]:
         """Return (lines, raw_text) for one page image."""
@@ -188,20 +142,14 @@ class QwenVlTranscriber:
                 ],
             }
         ]
-        text = self._processor.apply_chat_template(  # type: ignore[union-attr]
+        inputs = self._processor.apply_chat_template(  # type: ignore[union-attr]
             messages,
-            tokenize=False,
+            tokenize=True,
             add_generation_prompt=True,
-        )
-        image_inputs, video_inputs = self._process_vision_info(messages)
-        inputs = self._processor(  # type: ignore[union-attr]
-            text=[text],
-            images=image_inputs,
-            videos=video_inputs,
-            padding=True,
+            return_dict=True,
             return_tensors="pt",
         )
-        inputs = inputs.to(self._inference_device)
+        inputs = inputs.to(self._input_device)
 
         with self._torch.no_grad():
             generated_ids = self._model.generate(  # type: ignore[union-attr]
@@ -210,7 +158,7 @@ class QwenVlTranscriber:
             )
         generated_ids_trimmed = [
             out_ids[len(in_ids) :]
-            for in_ids, out_ids in zip(inputs.input_ids, generated_ids)
+            for in_ids, out_ids in zip(inputs["input_ids"], generated_ids)
         ]
         raw = self._processor.batch_decode(  # type: ignore[union-attr]
             generated_ids_trimmed,
@@ -220,7 +168,7 @@ class QwenVlTranscriber:
 
         lines = parse_transcription_lines(raw)
         if not lines:
-            raise RuntimeError("Qwen2.5-VL returned empty transcription")
+            raise RuntimeError("Qwen3-VL returned empty transcription")
         return lines, raw
 
     def to_contract(self, lines: list[str]) -> dict[str, object]:
@@ -242,15 +190,12 @@ class QwenVlTranscriber:
 
 def main() -> int:
     args = parse_args()
-    cpu_offload: bool | None = None
-    if args.no_cpu_offload:
-        cpu_offload = False
-    elif args.cpu_offload:
-        cpu_offload = True
     transcriber = QwenVlTranscriber(
         model_dir=args.model_dir,
         max_new_tokens=args.max_new_tokens,
-        cpu_offload=cpu_offload,
+        device_map=args.device_map,
+        torch_dtype=args.torch_dtype,
+        attn_implementation=args.attn_implementation,
     )
     lines, raw = transcriber.transcribe_page(args.image)
     text = "\n".join(lines)

@@ -32,6 +32,11 @@ export interface SearchIndexManifest {
   checksum?: string;
   jsonlPath?: string;
   miniSearchPath?: string;
+  embeddingBuiltAt?: string;
+  chunkCount?: number;
+  embeddingModel?: string;
+  embeddingDbPath?: string;
+  embeddingSourceChecksum?: string;
   facets: {
     documentTypes: FacetEntry[];
     collections: FacetEntry[];

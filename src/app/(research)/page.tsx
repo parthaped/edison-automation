@@ -1,8 +1,10 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { ArrowRight, FileSearch, Layers, Sparkles } from "lucide-react";
+import { HeroImageCarousel } from "@/components/research/hero-image-carousel";
 import { LandingExploreGrid } from "@/components/research/landing-explore-grid";
 import { SearchBar } from "@/components/research/search-bar";
+import { HERO_CAROUSEL_IMAGES } from "@/lib/landing-images";
 
 export const metadata: Metadata = {
   title: "Edison Papers Research Platform",
@@ -42,30 +44,31 @@ const features = [
 export default function ResearchHomePage() {
   return (
     <div>
-      <section className="border-b border-border bg-gradient-to-b from-white to-[#f4f6f9]">
-        <div className="mx-auto max-w-4xl px-4 py-16 text-center sm:px-6 sm:py-24">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-primary/70">
+      <section className="relative min-h-[28rem] overflow-hidden border-b border-border sm:min-h-[32rem]">
+        <HeroImageCarousel images={HERO_CAROUSEL_IMAGES} />
+        <div className="relative z-10 mx-auto max-w-4xl px-4 py-16 text-center sm:px-6 sm:py-24">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-white/80 [text-shadow:0_1px_2px_rgba(0,0,0,0.35)]">
             Thomas A. Edison Papers
           </p>
-          <h1 className="mt-4 text-[2rem] font-bold tracking-tight text-foreground sm:text-5xl lg:text-[3.25rem] lg:leading-[1.1]">
+          <h1 className="mt-4 text-[2rem] font-bold tracking-tight text-white [text-shadow:0_2px_8px_rgba(0,0,0,0.45)] sm:text-5xl lg:text-[3.25rem] lg:leading-[1.1]">
             Discover Edison&apos;s papers<br className="hidden sm:block" /> by meaning
           </h1>
-          <p className="mx-auto mt-5 max-w-xl text-base leading-relaxed text-muted-foreground sm:text-lg">
+          <p className="mx-auto mt-5 max-w-xl text-base leading-relaxed text-white/85 [text-shadow:0_1px_4px_rgba(0,0,0,0.35)] sm:text-lg">
             Search letters, lab notebooks, patents, and correspondence from the
             Edison Digital edition — by meaning, not just exact words.
           </p>
 
           <div className="mx-auto mt-10 max-w-2xl">
-            <SearchBar size="hero" autoFocus />
+            <SearchBar size="hero" autoFocus className="shadow-lg" />
           </div>
 
           <div className="mt-5 flex flex-wrap items-center justify-center gap-2">
-            <span className="text-xs text-muted-foreground/70">Try:</span>
+            <span className="text-xs text-white/70">Try:</span>
             {exampleQueries.map((query) => (
               <Link
                 key={query}
                 href={`/search?q=${encodeURIComponent(query)}`}
-                className="rounded-full border border-border/80 bg-white px-3 py-1 text-xs text-foreground/70 transition-colors hover:border-primary/30 hover:bg-primary/5 hover:text-foreground"
+                className="rounded-full border border-white/25 bg-white/90 px-3 py-1 text-xs text-foreground/80 transition-colors hover:border-white/40 hover:bg-white hover:text-foreground"
               >
                 {query}
               </Link>
@@ -75,7 +78,7 @@ export default function ResearchHomePage() {
           <p className="mt-6">
             <Link
               href="/search/advanced"
-              className="text-xs font-medium text-muted-foreground transition-colors hover:text-primary"
+              className="text-xs font-medium text-white/80 transition-colors hover:text-white"
             >
               Advanced search — filter by time period, type, author, place, and more
             </Link>

@@ -14,13 +14,7 @@
     "lint": "eslint",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit",
-    "wipe:blob": "node scripts/wipe-blob-store.mjs",
-    "search:harvest": "python ml/scripts/build_search_index.py",
-    "search:minisearch": "node scripts/build-minisearch-index.mjs",
-    "search:upload": "node --env-file=.env.local scripts/upload-search-index.mjs",
-    "search:build": "python ml/scripts/build_search_index.py && node scripts/build-minisearch-index.mjs && node --env-file=.env.local scripts/upload-search-index.mjs",
-    "search:build:local": "python ml/scripts/build_search_index.py && node scripts/build-minisearch-index.mjs"
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@ai-sdk/google": "^2.0.23",

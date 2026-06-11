@@ -1,14 +1,10 @@
-# Qwen2.5-VL 7B local transcription (4-bit). Install on top of the CUDA ML venv:
+# Qwen3-VL transcription for Amarel/local GPU runs. Install in a dedicated Qwen venv:
 #   pip install -r ml/requirements-qwen-vl.txt
 #
-# Windows: skip decord; qwen-vl-utils falls back to torchvision.
+# Optional on Amarel for faster inference: install flash-attn separately and run with
+# --attn-implementation flash_attention_2.
 
-# Pin below 5.10: transformers 5.10+ imports torch.float8_e8m0fnu (needs torch>=2.7).
-# Kraken venv uses torch 2.6+cu124 from setup_kraken_cuda.ps1.
-transformers>=4.49,<5.10
+transformers>=4.57,<5
 accelerate>=1.0
-qwen-vl-utils>=0.0.8
-# 0.50+ fixes Params4bit _is_hf_initialized with transformers 5.x (patch in transcribe_qwen_vl until then).
-bitsandbytes>=0.43
 huggingface_hub>=0.23
 pillow>=10.0

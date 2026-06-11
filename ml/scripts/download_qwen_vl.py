@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Download Qwen2.5-VL-7B-Instruct into ml/models/ for local transcription."""
+"""Download Qwen3-VL-8B-Instruct into ml/models/ for local transcription."""
 
 from __future__ import annotations
 
@@ -7,8 +7,8 @@ import argparse
 import os
 from pathlib import Path
 
-DEFAULT_MODEL_ID = "Qwen/Qwen2.5-VL-7B-Instruct"
-DEFAULT_OUTPUT = Path("ml/models/Qwen2.5-VL-7B-Instruct")
+DEFAULT_MODEL_ID = "Qwen/Qwen3-VL-8B-Instruct"
+DEFAULT_OUTPUT = Path("ml/models/Qwen3-VL-8B-Instruct")
 
 
 def parse_args() -> argparse.Namespace:
@@ -18,7 +18,7 @@ def parse_args() -> argparse.Namespace:
         "--output",
         type=Path,
         default=DEFAULT_OUTPUT,
-        help="Local directory for model weights (~15 GB).",
+        help="Local directory for unquantized model weights.",
     )
     return parser.parse_args()
 
@@ -33,7 +33,7 @@ def main() -> int:
     token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")
     args.output.parent.mkdir(parents=True, exist_ok=True)
 
-    print(f"Downloading {args.model_id} into {args.output} (~15 GB)...")
+    print(f"Downloading {args.model_id} into {args.output}...")
     if not token:
         print("Tip: set HF_TOKEN or run `huggingface-cli login` if the repo is gated.")
 

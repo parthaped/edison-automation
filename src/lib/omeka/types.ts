@@ -101,7 +101,7 @@ export interface SearchResponse {
   perPage: number;
   results: SearchResultDocument[];
   facets: SearchFacets;
-  searchMode: "semantic" | "keyword";
+  searchMode: "semantic" | "keyword" | "hybrid";
   indexBuiltAt?: string | null;
   manifestFacets?: SearchIndexManifestFacets | null;
 }
