@@ -68,15 +68,15 @@ export function IiifViewer({
         }
 
         const tileSources = pages.map((page) => ({
-          type: "image" as const,
+          type: "image",
           url: page.url,
           buildPyramid: true,
-          crossOriginPolicy: "Anonymous" as const,
+          crossOriginPolicy: "Anonymous",
         }));
 
         const viewer = OpenSeadragon({
           element: containerRef.current,
-          tileSources,
+          tileSources: tileSources as OpenSeadragon.Options["tileSources"],
           sequenceMode: true,
           initialPage: Math.min(Math.max(0, initialPage), pages.length - 1),
           showNavigationControl: false,
