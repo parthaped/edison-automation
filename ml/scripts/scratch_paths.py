@@ -30,10 +30,22 @@ def gemma_model_dir() -> Path:
     return model_root() / "gemma-4-26b-a4b-it"
 
 
+def repo_root() -> Path:
+    return Path(__file__).resolve().parents[2]
+
+
+def repo_corpus_dir() -> Path:
+    """Paired benchmark images + reference transcripts shipped in the git repo."""
+    return repo_root() / "ml" / "data" / "sources-with-transcript"
+
+
 def data_dir() -> Path:
     override = os.environ.get("EDISON_DATA_DIR")
     if override:
         return Path(override)
+    bundled = repo_corpus_dir()
+    if bundled.is_dir() and any(bundled.iterdir()):
+        return bundled
     return scratch_root() / "data" / "sources-with-transcript"
 
 

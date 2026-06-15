@@ -44,7 +44,9 @@ next-env.d.ts
 /ml/.venv/
 /ml/.venv-qwen-vl/
 /ml/**/__pycache__/
-/ml/data/
+/ml/data/*
+!/ml/data/sources-with-transcript/
+!/ml/data/sources-with-transcript/**
 /ml/reports/
 /ml/models/
 

@@ -10,7 +10,7 @@ GPU transcription for Qwen3-VL-30B-A3B and Gemma-4-26B-A4B-it at full bf16. All 
   models/qwen3-vl-30b-a3b/      # Qwen weights
   models/gemma-4-26b-a4b-it/    # Gemma weights
   hf-cache/                      # Hugging Face cache
-  data/sources-with-transcript/  # corpus + reference TXT
+  repo/ml/data/sources-with-transcript/  # benchmark corpus (from git)
   runs/$SLURM_JOB_ID/            # GPU outputs
   logs/                          # SLURM stdout/stderr
   .venv-vl-bench/                # GPU Python venv
@@ -36,14 +36,17 @@ source "$SCRATCH/.venv-compare/bin/activate"
 pip install -r ml/requirements-compare.txt
 ```
 
-## Sync corpus to scratch
+## Benchmark corpus (in git)
 
-From WSL or another host with access to your files:
+Paired page images and reference transcripts live in the repo at:
 
-```bash
-rsync -av "/mnt/c/Users/Partha/Downloads/Sources with Transcript/" \
-  /scratch/$USER/edison-automation/data/sources-with-transcript/
 ```
+ml/data/sources-with-transcript/
+```
+
+After `git clone` or `git pull` on Amarel, the SLURM job reads that path automatically
+(`EDISON_DATA_DIR=$SCRATCH/repo/ml/data/sources-with-transcript`). No separate rsync from
+Windows is required.
 
 ## Verify L40 nodes
 
@@ -78,7 +81,7 @@ cd $EDISON_SCRATCH_ROOT/repo
 
 python ml/scripts/compare_run_results.py \
   --run-dir $EDISON_SCRATCH_ROOT/runs/<JOB_ID> \
-  --data-dir $EDISON_SCRATCH_ROOT/data/sources-with-transcript \
+  --data-dir $EDISON_SCRATCH_ROOT/repo/ml/data/sources-with-transcript \
   --log-file $EDISON_SCRATCH_ROOT/runs/<JOB_ID>/compare.log \
   --slurm-log $EDISON_SCRATCH_ROOT/logs/edison-vl-bench-<JOB_ID>.out
 ```
@@ -96,7 +99,6 @@ Outputs on scratch:
 source /scratch/$USER/edison-automation/.venv-vl-bench/bin/activate
 cd /scratch/$USER/edison-automation/repo
 export EDISON_SCRATCH_ROOT=/scratch/$USER/edison-automation
-export EDISON_DATA_DIR=$EDISON_SCRATCH_ROOT/data/sources-with-transcript
 export EDISON_RUN_DIR=$EDISON_SCRATCH_ROOT/runs/manual-smoke
 
 python ml/scripts/benchmark_documents.py --models qwen --limit 1 --skip-download

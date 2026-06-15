@@ -15,7 +15,7 @@ export EDISON_SCRATCH_ROOT="/scratch/${USER}/edison-automation"
 export HF_HOME="${EDISON_SCRATCH_ROOT}/hf-cache"
 export TRANSFORMERS_CACHE="${HF_HOME}"
 export EDISON_MODEL_ROOT="${EDISON_SCRATCH_ROOT}/models"
-export EDISON_DATA_DIR="${EDISON_SCRATCH_ROOT}/data/sources-with-transcript"
+export EDISON_DATA_DIR="${EDISON_SCRATCH_ROOT}/repo/ml/data/sources-with-transcript"
 export EDISON_RUN_DIR="${EDISON_SCRATCH_ROOT}/runs/${SLURM_JOB_ID}"
 
 mkdir -p "${EDISON_RUN_DIR}" "${EDISON_SCRATCH_ROOT}/logs" "${HF_HOME}"
