@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Download Qwen3-VL-30B-A3B-Instruct to scratch for Amarel transcription."""
+"""Download Gemma 4 26B A4B Instruct to scratch for Amarel transcription."""
 
 from __future__ import annotations
 
@@ -12,9 +12,9 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
-from scratch_paths import ensure_under_scratch, qwen_model_dir  # noqa: E402
+from scratch_paths import ensure_under_scratch, gemma_model_dir  # noqa: E402
 
-DEFAULT_MODEL_ID = "Qwen/Qwen3-VL-30B-A3B-Instruct"
+DEFAULT_MODEL_ID = "google/gemma-4-26B-A4B-it"
 
 
 def parse_args() -> argparse.Namespace:
@@ -24,14 +24,14 @@ def parse_args() -> argparse.Namespace:
         "--output",
         type=Path,
         default=None,
-        help="Local directory for unquantized model weights (default: scratch qwen path).",
+        help="Local directory for unquantized model weights (default: scratch gemma path).",
     )
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
-    output = args.output or qwen_model_dir()
+    output = args.output or gemma_model_dir()
     ensure_under_scratch(output)
 
     try:
@@ -46,7 +46,10 @@ def main() -> int:
 
     print(f"Downloading {args.model_id} into {output}...")
     if not token:
-        print("Tip: set HF_TOKEN or run `huggingface-cli login` if the repo is gated.")
+        print(
+            "Tip: set HF_TOKEN, accept the Gemma license on Hugging Face, "
+            "and run `huggingface-cli login`."
+        )
 
     snapshot_download(
         repo_id=args.model_id,

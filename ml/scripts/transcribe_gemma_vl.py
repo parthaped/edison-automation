@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Transcribe Edison archival page images with Qwen3-VL-30B-A3B-Instruct."""
+"""Transcribe Edison archival page images with Gemma 4 26B A4B Instruct."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 from generation_metrics import GenerationMetrics  # noqa: E402
-from scratch_paths import qwen_model_dir  # noqa: E402
+from scratch_paths import gemma_model_dir  # noqa: E402
 from transcription_text import DIPLOMATIC_PROMPT, parse_transcription_lines  # noqa: E402
 
 try:
@@ -26,13 +26,13 @@ except (ImportError, ModuleNotFoundError, AttributeError) as error:
     torch = None  # type: ignore[assignment]
     AutoModelForImageTextToText = None  # type: ignore[assignment]
     AutoProcessor = None  # type: ignore[assignment]
-    QWEN_IMPORT_ERROR: BaseException | None = error
+    GEMMA_IMPORT_ERROR: BaseException | None = error
 else:
-    QWEN_IMPORT_ERROR = None
+    GEMMA_IMPORT_ERROR = None
 
-PROMPT_VERSION = "local-qwen3-vl-30b-v1"
-MODEL_LABEL = "qwen3-vl-30b-a3b-instruct"
-MODEL_SLUG = "qwen3-vl-30b"
+PROMPT_VERSION = "local-gemma-4-26b-a4b-v1"
+MODEL_LABEL = "gemma-4-26b-a4b-it"
+MODEL_SLUG = "gemma-4-26b"
 
 
 def parse_args() -> argparse.Namespace:
@@ -40,24 +40,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--image", type=Path, required=True, help="Page image (JPG/PNG).")
     parser.add_argument("--model-dir", type=Path, default=None)
     parser.add_argument("--max-new-tokens", type=int, default=4096)
-    parser.add_argument("--output", type=Path, default=None, help="Optional output text file.")
-    parser.add_argument("--json", action="store_true", help="Emit local OCR contract JSON.")
-    parser.add_argument(
-        "--device-map",
-        default="auto",
-        help='Transformers device_map. Defaults to "auto" for 2× L40 sharding.',
-    )
+    parser.add_argument("--output", type=Path, default=None)
+    parser.add_argument("--json", action="store_true")
+    parser.add_argument("--device-map", default="auto")
     parser.add_argument(
         "--torch-dtype",
         choices=("auto", "bfloat16", "float16", "float32"),
         default="bfloat16",
-        help="Torch dtype for unquantized weights.",
     )
-    parser.add_argument(
-        "--attn-implementation",
-        default=None,
-        help='Optional attention implementation, e.g. "flash_attention_2".',
-    )
+    parser.add_argument("--attn-implementation", default=None)
     return parser.parse_args()
 
 
@@ -68,7 +59,7 @@ def resolve_torch_dtype(torch_module: object, dtype_name: str) -> object:
 
 
 @dataclass
-class QwenVlTranscriber:
+class GemmaVlTranscriber:
     model_dir: Path
     max_new_tokens: int = 4096
     device_map: str = "auto"
@@ -83,24 +74,22 @@ class QwenVlTranscriber:
             return
 
         if (
-            QWEN_IMPORT_ERROR is not None
+            GEMMA_IMPORT_ERROR is not None
             or torch is None
             or AutoModelForImageTextToText is None
             or AutoProcessor is None
         ):
             raise RuntimeError(
-                "Qwen VLM import failed. Run: pip install -r ml/requirements-vl-benchmark.txt "
-                "(needs transformers>=4.57 with torch 2.6+cu124). "
-                f"Original error: {QWEN_IMPORT_ERROR}"
-            ) from QWEN_IMPORT_ERROR
+                "Gemma VLM import failed. Run: pip install -r ml/requirements-vl-benchmark.txt "
+                f"Original error: {GEMMA_IMPORT_ERROR}"
+            ) from GEMMA_IMPORT_ERROR
 
         if not self.model_dir.exists():
             raise RuntimeError(
-                f"Model not found at {self.model_dir}. Run: python ml/scripts/download_qwen_vl.py"
+                f"Model not found at {self.model_dir}. Run: python ml/scripts/download_gemma_vl.py"
             )
 
-        device_map_lower = self.device_map.lower()
-        if device_map_lower != "cpu" and not torch.cuda.is_available():
+        if self.device_map.lower() != "cpu" and not torch.cuda.is_available():
             raise RuntimeError(
                 "CUDA is not available. Run on an Amarel GPU node with 2× L40 GPUs."
             )
@@ -114,7 +103,7 @@ class QwenVlTranscriber:
             load_kwargs["attn_implementation"] = self.attn_implementation
 
         print(
-            f"Qwen3-VL-30B: loading full bf16 weights "
+            f"Gemma-4-26B: loading full bf16 weights "
             f"(dtype={self.torch_dtype}, device_map={self.device_map}).",
             file=sys.stderr,
         )
@@ -137,7 +126,6 @@ class QwenVlTranscriber:
             torch.cuda.empty_cache()
 
     def transcribe_page(self, image_path: Path) -> tuple[list[str], str, GenerationMetrics]:
-        """Return (lines, raw_text, metrics) for one page image."""
         self._load()
         image_path = image_path.resolve()
         if not image_path.exists():
@@ -183,7 +171,7 @@ class QwenVlTranscriber:
 
         lines = parse_transcription_lines(raw)
         if not lines:
-            raise RuntimeError("Qwen3-VL returned empty transcription")
+            raise RuntimeError("Gemma 4 returned empty transcription")
 
         metrics = GenerationMetrics(
             input_tokens=input_len,
@@ -192,28 +180,11 @@ class QwenVlTranscriber:
         )
         return lines, raw, metrics
 
-    def to_contract(self, lines: list[str]) -> dict[str, object]:
-        text = "\n".join(lines)
-        return {
-            "ocrText": text,
-            "model": f"local/{MODEL_LABEL}",
-            "promptVersion": PROMPT_VERSION,
-            "uncertainReadings": [],
-            "pages": [
-                {
-                    "pageIndex": 0,
-                    "text": text,
-                    "lines": [{"lineIndex": index, "text": line} for index, line in enumerate(lines)],
-                }
-            ],
-        }
-
 
 def main() -> int:
     args = parse_args()
-    model_dir = args.model_dir or qwen_model_dir()
-    transcriber = QwenVlTranscriber(
-        model_dir=model_dir,
+    transcriber = GemmaVlTranscriber(
+        model_dir=args.model_dir or gemma_model_dir(),
         max_new_tokens=args.max_new_tokens,
         device_map=args.device_map,
         torch_dtype=args.torch_dtype,
@@ -228,9 +199,18 @@ def main() -> int:
         print(f"Wrote {args.output}", file=sys.stderr)
 
     if args.json:
-        payload = transcriber.to_contract(lines)
-        payload["metrics"] = metrics.to_dict()
-        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        print(
+            json.dumps(
+                {
+                    "model": MODEL_LABEL,
+                    "promptVersion": PROMPT_VERSION,
+                    "text": text,
+                    "metrics": metrics.to_dict(),
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
     else:
         print(text)
 

@@ -1,0 +1,1 @@
+# Login-node compare venv (stdlib only — no torch/transformers).

@@ -1,0 +1,6 @@
+# VL benchmark GPU dependencies (install in scratch .venv-vl-bench).
+# Install torch separately: pip install torch --index-url https://download.pytorch.org/whl/cu124
+#
+# Optional: flash-attn for --attn-implementation flash_attention_2
+
+-r requirements-qwen-vl.txt
